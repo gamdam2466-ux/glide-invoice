@@ -274,24 +274,23 @@ export default function App() {
     setIsGeneratingImg(true);
     
     try {
-      const element = invoiceRef.current;
-      const canvas = await html2canvas(element, {
-        scale: 3, // Higher scale for better quality
-        useCORS: true,
-        logging: false,
+      const { toPng } = await import('html-to-image');
+      const dataUrl = await toPng(invoiceRef.current, {
+        quality: 1,
+        pixelRatio: 3,
         backgroundColor: '#ffffff'
       });
       
-      const imgData = canvas.toDataURL('image/png');
       const link = document.createElement('a');
       link.download = `Invoice_${invoice.studentName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.png`;
-      link.href = imgData;
+      link.href = dataUrl;
       link.click();
       
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
     } catch (error) {
       console.error('Error generating Image:', error);
+      alert('Error generating Image. Please see console for details.');
     } finally {
       setIsGeneratingImg(false);
     }
@@ -302,27 +301,26 @@ export default function App() {
     setIsGenerating(true);
     
     try {
-      const element = invoiceRef.current;
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
+      const { toPng } = await import('html-to-image');
+      const dataUrl = await toPng(invoiceRef.current, {
+        quality: 1,
+        pixelRatio: 2,
         backgroundColor: '#ffffff'
       });
       
-      const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('p', 'mm', 'a4');
-      const imgProps = pdf.getImageProperties(imgData);
+      const imgProps = pdf.getImageProperties(dataUrl);
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
       
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
       pdf.save(`Invoice_${invoice.studentName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`);
       
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
     } catch (error) {
       console.error('Error generating PDF:', error);
+      alert('Error generating PDF. Please see console for details.');
     } finally {
       setIsGenerating(false);
     }
