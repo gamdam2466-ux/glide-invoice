@@ -29,9 +29,11 @@ interface Student {
 
 interface Lesson {
   id: string;
-  date: string;
+  type: string;
+  dates: string[];
   time: string;
   duration: string;
+  price: number | null;
 }
 
 interface InvoiceData {
@@ -41,6 +43,7 @@ interface InvoiceData {
   parentName: string;
   email: string;
   lessons: Lesson[];
+  nextBillingDate: string;
   dueDate: string;
   billingCycle: string;
   notes: string;
@@ -75,10 +78,13 @@ export default function App() {
     email: '',
     lessons: [{
       id: Date.now().toString(),
-      date: new Date().toISOString().split('T')[0],
+      type: 'Private Ice Skating Lesson',
+      dates: [new Date().toISOString().split('T')[0]],
       time: '10:00',
-      duration: '60 min'
+      duration: '60 min',
+      price: null
     }],
+    nextBillingDate: '',
     dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     billingCycle: 'Weekly',
     notes: 'Thank you for the lesson!',
@@ -206,7 +212,7 @@ export default function App() {
       studentName: student.name,
       parentName: student.parentName,
       email: student.email,
-      amount: student.rate * prev.lessons.length // Default to rate * num lessons
+      amount: prev.lessons.reduce((sum, l) => sum + (l.price !== null ? l.price : student.rate * l.dates.length), 0)
     }));
     setView('invoice');
   };
@@ -222,9 +228,11 @@ export default function App() {
   const addLesson = () => {
     const newLesson: Lesson = {
       id: Date.now().toString(),
-      date: new Date().toISOString().split('T')[0],
+      type: 'Private Ice Skating Lesson',
+      dates: [new Date().toISOString().split('T')[0]],
       time: '10:00',
-      duration: '60 min'
+      duration: '60 min',
+      price: null
     };
     
     setInvoice(prev => {
@@ -234,7 +242,39 @@ export default function App() {
       return {
         ...prev,
         lessons: newLessons,
-        amount: rate * newLessons.length // Auto-update amount
+        amount: newLessons.reduce((sum, l) => sum + (l.price !== null ? l.price : rate * l.dates.length), 0)
+      };
+    });
+  };
+
+  const addPackage = () => {
+    const dates = Array.from({ length: 6 }).map((_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() + i * 7);
+      return d.toISOString().split('T')[0];
+    });
+
+    const newPackage: Lesson = {
+      id: Date.now().toString(),
+      type: '6-Week Private Lesson Package',
+      dates: dates,
+      time: '10:00',
+      duration: '60 min',
+      price: null
+    };
+
+    setInvoice(prev => {
+      const student = students.find(s => s.id === prev.studentId);
+      const rate = student ? student.rate : 50;
+      const newLessons = [...prev.lessons, newPackage];
+      const nextBilling = new Date(dates[5]);
+      nextBilling.setDate(nextBilling.getDate() + 7);
+
+      return {
+        ...prev,
+        lessons: newLessons,
+        nextBillingDate: nextBilling.toISOString().split('T')[0],
+        amount: newLessons.reduce((sum, l) => sum + (l.price !== null ? l.price : rate * l.dates.length), 0)
       };
     });
   };
@@ -248,16 +288,58 @@ export default function App() {
       return {
         ...prev,
         lessons: newLessons,
-        amount: rate * newLessons.length // Auto-update amount
+        amount: newLessons.reduce((sum, l) => sum + (l.price !== null ? l.price : rate * l.dates.length), 0)
       };
     });
   };
 
-  const updateLesson = (id: string, field: keyof Lesson, value: string) => {
-    setInvoice(prev => ({
-      ...prev,
-      lessons: prev.lessons.map(l => l.id === id ? { ...l, [field]: value } : l)
-    }));
+  const updateLesson = (id: string, field: keyof Lesson, value: any) => {
+    setInvoice(prev => {
+      const newLessons = prev.lessons.map(l => l.id === id ? { ...l, [field]: value } : l);
+      const student = students.find(s => s.id === prev.studentId);
+      const rate = student ? student.rate : 50;
+      return {
+        ...prev,
+        lessons: newLessons,
+        amount: newLessons.reduce((sum, l) => sum + (l.price !== null ? l.price : rate * l.dates.length), 0)
+      };
+    });
+  };
+
+  const updateLessonDate = (id: string, dateIndex: number, value: string) => {
+    setInvoice(prev => {
+      const newLessons = prev.lessons.map(l => {
+        if (l.id === id) {
+          const newDates = [...l.dates];
+          newDates[dateIndex] = value;
+          
+          if (dateIndex === 0 && l.dates.length === 6) {
+            const baseDate = new Date(value);
+            for (let i = 1; i < 6; i++) {
+              const d = new Date(baseDate);
+              d.setDate(d.getDate() + i * 7);
+              newDates[i] = d.toISOString().split('T')[0];
+            }
+          }
+          return { ...l, dates: newDates };
+        }
+        return l;
+      });
+      
+      let newNextBillingDate = prev.nextBillingDate;
+      const updatedLesson = newLessons.find(l => l.id === id);
+      if (updatedLesson && updatedLesson.dates.length === 6 && dateIndex === 0) {
+        const lastDate = new Date(updatedLesson.dates[5]);
+        lastDate.setDate(lastDate.getDate() + 7);
+        newNextBillingDate = lastDate.toISOString().split('T')[0];
+      }
+
+      return {
+        ...prev,
+        lessons: newLessons,
+        nextBillingDate: newNextBillingDate
+      };
+    });
   };
 
   const saveCoachInfo = () => {
@@ -646,33 +728,79 @@ export default function App() {
                       className="w-full px-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500 transition-all"
                     />
                   </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 uppercase mb-1">Next Billing Date</label>
+                    <input 
+                      type="date" 
+                      name="nextBillingDate"
+                      value={invoice.nextBillingDate}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500 transition-all"
+                    />
+                  </div>
                 </div>
 
                 {/* Lessons List Editor */}
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Lessons ({invoice.lessons.length})</h3>
-                    <button 
-                      onClick={addLesson}
-                      className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                    >
-                      <Plus className="w-3 h-3" /> Add Lesson
-                    </button>
+                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
+                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Line Items ({invoice.lessons.length})</h3>
+                    <div className="flex items-center gap-3">
+                      <button 
+                        onClick={addLesson}
+                        className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 bg-blue-50 px-2 py-1 rounded-lg"
+                      >
+                        <Plus className="w-3 h-3" /> Custom Item
+                      </button>
+                      <button 
+                        onClick={addPackage}
+                        className="text-xs font-bold text-purple-600 hover:text-purple-700 flex items-center gap-1 bg-purple-50 px-2 py-1 rounded-lg"
+                      >
+                        <Plus className="w-3 h-3" /> 6-Week Package
+                      </button>
+                    </div>
                   </div>
                   
                   <div className="space-y-3">
                     {invoice.lessons.map((lesson, index) => (
                       <div key={lesson.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 relative group">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Date</label>
-                            <input 
-                              type="date" 
-                              value={lesson.date}
-                              onChange={(e) => updateLesson(lesson.id, 'date', e.target.value)}
-                              className="w-full px-2 py-1 bg-white border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-                            />
-                          </div>
+                        <div className="mb-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                           <div>
+                             <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Description / Subj</label>
+                             <input 
+                               type="text" 
+                               value={lesson.type}
+                               onChange={(e) => updateLesson(lesson.id, 'type', e.target.value)}
+                               className="w-full px-2 py-1 bg-white border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                             />
+                           </div>
+                           <div>
+                             <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Custom Price ($) - Leave empty for default</label>
+                             <input 
+                               type="number" 
+                               value={lesson.price === null ? '' : lesson.price}
+                               onChange={(e) => updateLesson(lesson.id, 'price', e.target.value === '' ? null : parseFloat(e.target.value))}
+                               className="w-full px-2 py-1 bg-white border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                             />
+                           </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-2 mb-3">
+                          {lesson.dates.map((date, dateIdx) => (
+                            <div key={dateIdx} className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-slate-400 w-16 text-right">
+                                {lesson.dates.length > 1 ? `Week ${dateIdx + 1}` : 'Date'}
+                              </span>
+                              <input 
+                                type="date" 
+                                value={date}
+                                onChange={(e) => updateLessonDate(lesson.id, dateIdx, e.target.value)}
+                                className="flex-1 px-2 py-1 bg-white border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                              />
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           <div>
                             <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Time</label>
                             <input 
@@ -837,7 +965,7 @@ export default function App() {
                     {invoice.email}
                   </p>
                 </div>
-                <div className="grid grid-cols-2 gap-4" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="grid grid-cols-3 gap-4" style={{ display: 'grid', gridTemplateColumns: invoice.nextBillingDate ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)', gap: '1rem' }}>
                   <div>
                     <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#94a3b8', margin: 0 }}>Cycle</p>
                     <p className="font-semibold" style={{ color: '#334155', margin: 0 }}>{invoice.billingCycle}</p>
@@ -846,30 +974,52 @@ export default function App() {
                     <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#94a3b8', margin: 0 }}>Due Date</p>
                     <p className="font-semibold" style={{ color: '#334155', margin: 0 }}>{invoice.dueDate}</p>
                   </div>
+                  {invoice.nextBillingDate && (
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#94a3b8', margin: 0 }}>Next Billing</p>
+                      <p className="font-semibold" style={{ color: '#334155', margin: 0 }}>{invoice.nextBillingDate}</p>
+                    </div>
+                  )}
                 </div>
               </div>
 
               {/* Table Header */}
               <div className="pb-4 mb-4 grid grid-cols-12 gap-4" style={{ borderBottom: '2px solid #f1f5f9', display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '1rem' }}>
-                <div className="col-span-6 text-xs font-bold uppercase tracking-wider" style={{ color: '#94a3b8', gridColumn: 'span 6 / span 6' }}>Lesson Description</div>
-                <div className="col-span-3 text-xs font-bold uppercase tracking-wider text-right" style={{ color: '#94a3b8', gridColumn: 'span 3 / span 3', textAlign: 'right' }}>Time</div>
-                <div className="col-span-3 text-xs font-bold uppercase tracking-wider text-right" style={{ color: '#94a3b8', gridColumn: 'span 3 / span 3', textAlign: 'right' }}>Duration</div>
+                <div className="col-span-5 text-xs font-bold uppercase tracking-wider" style={{ color: '#94a3b8', gridColumn: 'span 5 / span 5' }}>Item Description</div>
+                <div className="col-span-2 text-xs font-bold uppercase tracking-wider text-center" style={{ color: '#94a3b8', gridColumn: 'span 2 / span 2', textAlign: 'center' }}>Time</div>
+                <div className="col-span-2 text-xs font-bold uppercase tracking-wider text-center" style={{ color: '#94a3b8', gridColumn: 'span 2 / span 2', textAlign: 'center' }}>Duration</div>
+                <div className="col-span-3 text-xs font-bold uppercase tracking-wider text-right" style={{ color: '#94a3b8', gridColumn: 'span 3 / span 3', textAlign: 'right' }}>Amount</div>
               </div>
 
               {/* Table Rows */}
               <div className="space-y-4">
-                {invoice.lessons.map((lesson) => (
-                  <div key={lesson.id} className="grid grid-cols-12 gap-4 py-2 items-center" style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '1rem', alignItems: 'center' }}>
-                    <div className="col-span-6" style={{ gridColumn: 'span 6 / span 6' }}>
-                      <h6 className="font-bold" style={{ color: '#1e293b', margin: 0 }}>Private Ice Skating Lesson</h6>
-                      <p className="text-sm flex items-center gap-1 mt-1" style={{ color: '#64748b', margin: 0, display: 'flex', alignItems: 'center' }}>
-                        <Calendar className="w-3 h-3" style={{ color: '#64748b' }} /> {lesson.date}
-                      </p>
+                {invoice.lessons.map((lesson) => {
+                  const student = students.find(s => s.id === invoice.studentId);
+                  const rate = student ? student.rate : 50;
+                  const itemPrice = lesson.price !== null ? lesson.price : rate * lesson.dates.length;
+                  return (
+                  <div key={lesson.id} className="grid grid-cols-12 gap-4 py-3 items-start" style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '1rem', alignItems: 'flex-start', borderBottom: '1px solid #f8fafc' }}>
+                    <div className="col-span-5" style={{ gridColumn: 'span 5 / span 5' }}>
+                      <h6 className="font-bold text-sm" style={{ color: '#1e293b', margin: 0 }}>{lesson.type}</h6>
+                      {lesson.dates.length > 1 ? (
+                        <div className="mt-2 space-y-1">
+                          {lesson.dates.map((d, i) => (
+                             <p key={i} className="text-xs flex items-center gap-1" style={{ color: '#64748b', margin: 0, display: 'flex', alignItems: 'center' }}>
+                               <span className="w-12 font-medium" style={{ display: 'inline-block', width: '3rem' }}>Week {i+1}:</span> <Calendar className="w-3 h-3" style={{ color: '#64748b', marginLeft: '4px', marginRight: '4px' }} /> {d}
+                             </p>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm flex items-center gap-1 mt-1" style={{ color: '#64748b', margin: 0, display: 'flex', alignItems: 'center' }}>
+                          <Calendar className="w-3 h-3" style={{ color: '#64748b' }} /> {lesson.dates[0]}
+                        </p>
+                      )}
                     </div>
-                    <div className="col-span-3 text-right font-medium" style={{ color: '#475569', gridColumn: 'span 3 / span 3', textAlign: 'right' }}>{lesson.time}</div>
-                    <div className="col-span-3 text-right font-bold" style={{ color: '#1e293b', gridColumn: 'span 3 / span 3', textAlign: 'right' }}>{lesson.duration}</div>
+                    <div className="col-span-2 text-center font-medium mt-1" style={{ color: '#475569', gridColumn: 'span 2 / span 2', textAlign: 'center' }}>{lesson.time}</div>
+                    <div className="col-span-2 text-center font-bold mt-1" style={{ color: '#1e293b', gridColumn: 'span 2 / span 2', textAlign: 'center' }}>{lesson.duration}</div>
+                    <div className="col-span-3 text-right font-bold mt-1" style={{ color: '#2563eb', gridColumn: 'span 3 / span 3', textAlign: 'right' }}>${itemPrice.toFixed(2)}</div>
                   </div>
-                ))}
+                )})}
               </div>
 
               {/* Spacer */}
