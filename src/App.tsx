@@ -50,6 +50,7 @@ interface InvoiceData {
   paymentMethod: string;
   amount: number;
   credits: number;
+  creditsNote: string;
   coachName: string;
   coachEmail: string;
 }
@@ -99,9 +100,10 @@ export default function App() {
     dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     billingCycle: '6 Week',
     notes: 'Thank you for the lesson!',
-    paymentMethod: 'Venmo / Zelle',
+    paymentMethod: 'Commonwealth Bank Australia\nWong Wing Nam\nBSB: 063-097\nAccount: 7273 8289\nPayID: 0405272775\nCash',
     amount: 50,
     credits: 0,
+    creditsNote: '',
     coachName: DEFAULT_COACH_NAME,
     coachEmail: DEFAULT_COACH_EMAIL,
   });
@@ -745,6 +747,17 @@ export default function App() {
                     />
                   </div>
                   <div>
+                    <label className="block text-xs font-medium text-slate-500 uppercase mb-1">Credits Note</label>
+                    <input 
+                      type="text" 
+                      name="creditsNote"
+                      value={invoice.creditsNote || ''}
+                      onChange={handleInputChange}
+                      placeholder="e.g. Missed lesson on Apr 4"
+                      className="w-full px-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500 transition-all"
+                    />
+                  </div>
+                  <div>
                     <label className="block text-xs font-medium text-slate-500 uppercase mb-1">Due Date</label>
                     <input 
                       type="date" 
@@ -874,14 +887,14 @@ export default function App() {
                 <div>
                   <label className="block text-xs font-medium text-slate-500 uppercase mb-1">Payment Method</label>
                   <div className="relative">
-                    <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                    <input 
-                      type="text" 
+                    <CreditCard className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                    <textarea 
                       name="paymentMethod"
                       value={invoice.paymentMethod}
                       onChange={handleInputChange}
+                      rows={5}
                       placeholder="e.g. Venmo: @coach-skate"
-                      className="w-full pl-10 pr-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500 transition-all"
+                      className="w-full pl-10 pr-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500 transition-all resize-y"
                     />
                   </div>
                 </div>
@@ -1062,7 +1075,9 @@ export default function App() {
                   <div className="grid grid-cols-12 gap-4 py-3 items-start" style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '1rem', alignItems: 'flex-start', borderBottom: '1px solid #f8fafc' }}>
                     <div className="col-span-9" style={{ gridColumn: 'span 9 / span 9' }}>
                       <h6 className="font-bold text-sm" style={{ color: '#059669', margin: 0 }}>Lesson Credit Applied</h6>
-                      <p className="text-sm mt-1" style={{ color: '#64748b', margin: 0 }}>{invoice.credits} minutes</p>
+                      <p className="text-sm mt-1" style={{ color: '#64748b', margin: 0 }}>
+                        {invoice.credits} minutes {invoice.creditsNote ? `- ${invoice.creditsNote}` : ''}
+                      </p>
                     </div>
                     <div className="col-span-3 text-right font-bold mt-1" style={{ color: '#059669', gridColumn: 'span 3 / span 3', textAlign: 'right' }}>
                       -${(() => {
@@ -1083,7 +1098,7 @@ export default function App() {
                   <div className="mb-6">
                     <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#94a3b8', margin: 0 }}>Payment Instructions</p>
                     <div className="p-4 rounded-2xl" style={{ backgroundColor: '#f8fafc', border: '1px solid #f1f5f9' }}>
-                      <p className="text-sm font-semibold" style={{ color: '#334155', margin: 0 }}>{invoice.paymentMethod}</p>
+                      <p className="text-sm font-semibold whitespace-pre-wrap leading-relaxed" style={{ color: '#334155', margin: 0 }}>{invoice.paymentMethod}</p>
                     </div>
                   </div>
                   <div>
