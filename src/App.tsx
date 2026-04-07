@@ -100,7 +100,7 @@ export default function App() {
     dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     billingCycle: '6 Week',
     notes: 'Thank you for the lesson!',
-    paymentMethod: 'Commonwealth Bank Australia\nWong Wing Nam\nBSB: 063-097\nAccount: 7273 8289\nPayID: 0405272775\nCash',
+    paymentMethod: 'Commonwealth Bank Australia\nWong Wing Nam\nBSB: 063-097\nAccount: 7273 8289\n/\nPayID: 0405272775\n/\nCash',
     amount: 50,
     credits: 0,
     creditsNote: '',
