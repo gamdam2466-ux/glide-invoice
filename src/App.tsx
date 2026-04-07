@@ -49,12 +49,23 @@ interface InvoiceData {
   notes: string;
   paymentMethod: string;
   amount: number;
+  credits: number;
   coachName: string;
   coachEmail: string;
 }
 
 const DEFAULT_COACH_NAME = "Skating Coach";
 const DEFAULT_COACH_EMAIL = "coach@example.com";
+
+const calculateTotal = (lessons: Lesson[], rate: number, credits: number) => {
+  const lessonsTotal = lessons.reduce((sum, l) => {
+    if (l.price !== null) return sum + l.price;
+    const durationMins = parseInt(l.duration) || 60;
+    return sum + (rate * (durationMins / 60) * l.dates.length);
+  }, 0);
+  const creditsDiscount = rate * ((credits || 0) / 60);
+  return Math.max(0, lessonsTotal - creditsDiscount);
+};
 
 type View = 'invoice' | 'students';
 
@@ -71,7 +82,7 @@ export default function App() {
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
   
   const [invoice, setInvoice] = useState<InvoiceData>({
-    id: `INV-${Date.now()}`,
+    id: `2026Term2(1)`,
     studentId: '',
     studentName: '',
     parentName: '',
@@ -86,10 +97,11 @@ export default function App() {
     }],
     nextBillingDate: '',
     dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    billingCycle: 'Weekly',
+    billingCycle: '6 Week',
     notes: 'Thank you for the lesson!',
     paymentMethod: 'Venmo / Zelle',
     amount: 50,
+    credits: 0,
     coachName: DEFAULT_COACH_NAME,
     coachEmail: DEFAULT_COACH_EMAIL,
   });
@@ -212,17 +224,21 @@ export default function App() {
       studentName: student.name,
       parentName: student.parentName,
       email: student.email,
-      amount: prev.lessons.reduce((sum, l) => sum + (l.price !== null ? l.price : student.rate * l.dates.length), 0)
+      amount: calculateTotal(prev.lessons, student.rate, prev.credits)
     }));
     setView('invoice');
   };
 
   const handleInputChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setInvoice(prev => ({ 
-      ...prev, 
-      [name]: name === 'amount' ? parseFloat(value) || 0 : value 
-    }));
+    setInvoice(prev => {
+      const updated = { ...prev, [name]: (name === 'amount' || name === 'credits') ? parseFloat(value) || 0 : value };
+      if (name === 'credits') {
+        const student = students.find(s => s.id === prev.studentId);
+        updated.amount = calculateTotal(prev.lessons, student ? student.rate : 50, updated.credits);
+      }
+      return updated;
+    });
   };
 
   const addLesson = () => {
@@ -242,7 +258,7 @@ export default function App() {
       return {
         ...prev,
         lessons: newLessons,
-        amount: newLessons.reduce((sum, l) => sum + (l.price !== null ? l.price : rate * l.dates.length), 0)
+        amount: calculateTotal(newLessons, rate, prev.credits)
       };
     });
   };
@@ -274,7 +290,7 @@ export default function App() {
         ...prev,
         lessons: newLessons,
         nextBillingDate: nextBilling.toISOString().split('T')[0],
-        amount: newLessons.reduce((sum, l) => sum + (l.price !== null ? l.price : rate * l.dates.length), 0)
+        amount: calculateTotal(newLessons, rate, prev.credits)
       };
     });
   };
@@ -288,7 +304,7 @@ export default function App() {
       return {
         ...prev,
         lessons: newLessons,
-        amount: newLessons.reduce((sum, l) => sum + (l.price !== null ? l.price : rate * l.dates.length), 0)
+        amount: calculateTotal(newLessons, rate, prev.credits)
       };
     });
   };
@@ -301,7 +317,7 @@ export default function App() {
       return {
         ...prev,
         lessons: newLessons,
-        amount: newLessons.reduce((sum, l) => sum + (l.price !== null ? l.price : rate * l.dates.length), 0)
+        amount: calculateTotal(newLessons, rate, prev.credits)
       };
     });
   };
@@ -687,6 +703,16 @@ export default function App() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
+                    <label className="block text-xs font-medium text-slate-500 uppercase mb-1">Invoice Number</label>
+                    <input 
+                      type="text" 
+                      name="id"
+                      value={invoice.id}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500 transition-all font-mono text-sm"
+                    />
+                  </div>
+                  <div>
                     <label className="block text-xs font-medium text-slate-500 uppercase mb-1">Student Name</label>
                     <input 
                       type="text" 
@@ -704,6 +730,17 @@ export default function App() {
                       name="amount"
                       value={invoice.amount}
                       onChange={handleInputChange}
+                      className="w-full px-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500 transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 uppercase mb-1">Credits (Minutes)</label>
+                    <input 
+                      type="number" 
+                      name="credits"
+                      value={invoice.credits || ''}
+                      onChange={handleInputChange}
+                      placeholder="e.g. 30"
                       className="w-full px-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500 transition-all"
                     />
                   </div>
@@ -972,7 +1009,7 @@ export default function App() {
                   </div>
                   <div>
                     <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#94a3b8', margin: 0 }}>Due Date</p>
-                    <p className="font-semibold" style={{ color: '#334155', margin: 0 }}>{invoice.dueDate}</p>
+                    <p className="font-semibold" style={{ color: '#e11d48', margin: 0 }}>{invoice.dueDate}</p>
                   </div>
                   {invoice.nextBillingDate && (
                     <div>
@@ -996,7 +1033,8 @@ export default function App() {
                 {invoice.lessons.map((lesson) => {
                   const student = students.find(s => s.id === invoice.studentId);
                   const rate = student ? student.rate : 50;
-                  const itemPrice = lesson.price !== null ? lesson.price : rate * lesson.dates.length;
+                  const durationMins = parseInt(lesson.duration) || 60;
+                  const itemPrice = lesson.price !== null ? lesson.price : (rate * (durationMins / 60) * lesson.dates.length);
                   return (
                   <div key={lesson.id} className="grid grid-cols-12 gap-4 py-3 items-start" style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '1rem', alignItems: 'flex-start', borderBottom: '1px solid #f8fafc' }}>
                     <div className="col-span-5" style={{ gridColumn: 'span 5 / span 5' }}>
@@ -1020,6 +1058,20 @@ export default function App() {
                     <div className="col-span-3 text-right font-bold mt-1" style={{ color: '#2563eb', gridColumn: 'span 3 / span 3', textAlign: 'right' }}>${itemPrice.toFixed(2)}</div>
                   </div>
                 )})}
+                {invoice.credits > 0 && (
+                  <div className="grid grid-cols-12 gap-4 py-3 items-start" style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '1rem', alignItems: 'flex-start', borderBottom: '1px solid #f8fafc' }}>
+                    <div className="col-span-9" style={{ gridColumn: 'span 9 / span 9' }}>
+                      <h6 className="font-bold text-sm" style={{ color: '#059669', margin: 0 }}>Lesson Credit Applied</h6>
+                      <p className="text-sm mt-1" style={{ color: '#64748b', margin: 0 }}>{invoice.credits} minutes</p>
+                    </div>
+                    <div className="col-span-3 text-right font-bold mt-1" style={{ color: '#059669', gridColumn: 'span 3 / span 3', textAlign: 'right' }}>
+                      -${(() => {
+                        const rate = students.find(s => s.id === invoice.studentId)?.rate || 50;
+                        return (rate * (invoice.credits / 60)).toFixed(2);
+                      })()}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Spacer */}
