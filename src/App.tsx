@@ -412,12 +412,14 @@ export default function App() {
         style: { width: '800px' }
       });
       
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const imgProps = pdf.getImageProperties(dataUrl);
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      const elementHeight = invoiceRef.current.offsetHeight;
+      const pdf = new jsPDF({
+        orientation: 'p',
+        unit: 'px',
+        format: [800, elementHeight]
+      });
       
-      pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.addImage(dataUrl, 'PNG', 0, 0, 800, elementHeight);
       pdf.save(`Invoice_${invoice.studentName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`);
       
       setShowSuccess(true);
@@ -977,16 +979,15 @@ export default function App() {
               </div>
 
           {/* The Actual Invoice Template */}
-          <div className="bg-white rounded-3xl shadow-2xl shadow-slate-200 overflow-hidden border border-slate-100">
+          <div className="bg-white rounded-3xl shadow-2xl shadow-slate-200 overflow-x-auto border border-slate-100 custom-scrollbar">
             <div 
               ref={invoiceRef}
               className="p-10 flex flex-col"
               style={{ 
-                width: '100%', 
-                maxWidth: '800px', 
+                width: '800px', 
+                minWidth: '800px', 
                 margin: '0 auto', 
                 backgroundColor: '#ffffff',
-                minHeight: '700px',
                 display: 'flex',
                 flexDirection: 'column'
               }}
@@ -1092,9 +1093,6 @@ export default function App() {
                   </div>
                 )}
               </div>
-
-              {/* Spacer */}
-              <div style={{ flexGrow: 1 }}></div>
 
               {/* Footer Section */}
               <div className="mt-12 pt-8 grid grid-cols-12 gap-8" style={{ borderTop: '2px solid #f8fafc', display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '2rem' }}>
