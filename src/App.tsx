@@ -93,7 +93,7 @@ export default function App() {
       type: 'Private Ice Skating Lesson',
       dates: [new Date().toISOString().split('T')[0]],
       time: '10:00',
-      duration: '60 min',
+      duration: '30 min',
       price: null
     }],
     nextBillingDate: '',
@@ -249,7 +249,7 @@ export default function App() {
       type: 'Private Ice Skating Lesson',
       dates: [new Date().toISOString().split('T')[0]],
       time: '10:00',
-      duration: '60 min',
+      duration: '30 min',
       price: null
     };
     
@@ -277,7 +277,7 @@ export default function App() {
       type: '6-Week Private Lesson Package',
       dates: dates,
       time: '10:00',
-      duration: '60 min',
+      duration: '30 min',
       price: null
     };
 
@@ -378,7 +378,9 @@ export default function App() {
       const dataUrl = await toPng(invoiceRef.current, {
         quality: 1,
         pixelRatio: 3,
-        backgroundColor: '#ffffff'
+        backgroundColor: '#ffffff',
+        width: 800,
+        style: { width: '800px' }
       });
       
       const link = document.createElement('a');
@@ -405,7 +407,9 @@ export default function App() {
       const dataUrl = await toPng(invoiceRef.current, {
         quality: 1,
         pixelRatio: 2,
-        backgroundColor: '#ffffff'
+        backgroundColor: '#ffffff',
+        width: 800,
+        style: { width: '800px' }
       });
       
       const pdf = new jsPDF('p', 'mm', 'a4');
