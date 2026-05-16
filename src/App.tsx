@@ -49,6 +49,7 @@ interface InvoiceData {
   amount: number;
   coachName: string;
   coachEmail: string;
+  generatedDate?: string;
 }
 
 const DEFAULT_COACH_NAME = "Skating Coach";
@@ -126,7 +127,13 @@ export default function App() {
     const savedHistory = localStorage.getItem('skating_invoice_history');
     if (savedHistory) {
       try {
-        setInvoiceHistory(JSON.parse(savedHistory));
+        const parsedHistory = JSON.parse(savedHistory);
+        const today = new Date().toISOString().split('T')[0];
+        const todaysHistory = parsedHistory.filter((inv: any) => inv.generatedDate === today);
+        setInvoiceHistory(todaysHistory);
+        if (parsedHistory.length !== todaysHistory.length) {
+          localStorage.setItem('skating_invoice_history', JSON.stringify(todaysHistory));
+        }
       } catch (e) {
         console.error('Error parsing invoice history', e);
       }
@@ -304,8 +311,10 @@ export default function App() {
 
   const saveToHistory = () => {
     setInvoiceHistory(prev => {
-      const filtered = prev.filter(inv => inv.id !== invoice.id);
-      const updated = [invoice, ...filtered].slice(0, 50);
+      const today = new Date().toISOString().split('T')[0];
+      const invoiceWithDate = { ...invoice, generatedDate: today };
+      const filtered = prev.filter(inv => inv.id !== invoice.id && inv.generatedDate === today);
+      const updated = [invoiceWithDate, ...filtered];
       localStorage.setItem('skating_invoice_history', JSON.stringify(updated));
       return updated;
     });
@@ -984,7 +993,7 @@ export default function App() {
                 <div className="col-span-5" style={{ gridColumn: 'span 5 / span 5' }}>
                   <div className="rounded-3xl p-6 text-right" style={{ backgroundColor: '#2563eb', color: '#ffffff', textAlign: 'right' }}>
                     <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#bfdbfe', margin: 0 }}>Total Amount Due</p>
-                    <p className="text-xs font-semibold mb-2" style={{ color: '#93c5fd', margin: 0 }}>GST Included</p>
+                    <p className="text-xs font-semibold mb-2" style={{ color: '#93c5fd', margin: 0 }}>Includes GST: ${(Number(invoice.amount) / 11).toFixed(2)}</p>
                     <h2 className="text-4xl font-black" style={{ margin: 0 }}>${Number(invoice.amount).toFixed(2)}</h2>
                   </div>
                 </div>
