@@ -84,7 +84,7 @@ export default function App() {
     dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     billingCycle: 'Weekly',
     notes: 'Thank you for the lesson!',
-    paymentMethod: 'Venmo / Zelle',
+    paymentMethod: 'Commonwealth Bank Australia\nWong Wing Nam\nBSB:063-097\nAccount: 72738289\nPay ID :0405272775\nCash',
     amount: 50,
     coachName: DEFAULT_COACH_NAME,
     coachEmail: DEFAULT_COACH_EMAIL,
@@ -220,6 +220,7 @@ export default function App() {
   const selectStudentForInvoice = (student: Student) => {
     setInvoice(prev => ({ 
       ...prev, 
+      id: `INV-${Date.now()}`,
       studentId: student.id,
       studentName: student.name,
       parentName: student.parentName,
@@ -808,14 +809,14 @@ export default function App() {
                 <div>
                   <label className="block text-xs font-medium text-slate-500 uppercase mb-1">Payment Method</label>
                   <div className="relative">
-                    <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                    <input 
-                      type="text" 
+                    <CreditCard className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                    <textarea 
                       name="paymentMethod"
                       value={invoice.paymentMethod}
                       onChange={handleInputChange}
+                      rows={6}
                       placeholder="e.g. Venmo: @coach-skate"
-                      className="w-full pl-10 pr-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500 transition-all"
+                      className="w-full pl-10 pr-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500 transition-all resize-none"
                     />
                   </div>
                 </div>
@@ -980,7 +981,7 @@ export default function App() {
                   <div className="mb-6">
                     <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#94a3b8', margin: 0 }}>Payment Instructions</p>
                     <div className="p-4 rounded-2xl" style={{ backgroundColor: '#f8fafc', border: '1px solid #f1f5f9' }}>
-                      <p className="text-sm font-semibold" style={{ color: '#334155', margin: 0 }}>{invoice.paymentMethod}</p>
+                      <p className="text-sm font-semibold" style={{ color: '#334155', margin: 0, whiteSpace: 'pre-wrap' }}>{invoice.paymentMethod}</p>
                     </div>
                   </div>
                   <div>
