@@ -225,6 +225,7 @@ export default function App() {
       studentName: student.name,
       parentName: student.parentName,
       email: student.email,
+      paymentMethod: 'Commonwealth Bank Australia\nWong Wing Nam\nBSB:063-097\nAccount: 72738289\nPay ID :0405272775\nCash',
       amount: student.rate * prev.lessons.length // Default to rate * num lessons
     }));
     setView('invoice');
@@ -663,7 +664,7 @@ export default function App() {
                 </div>
                 
                 <div className="flex flex-col gap-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
-                  {invoiceHistory.length > 0 ? invoiceHistory.slice(0, 5).map(inv => (
+                  {invoiceHistory.length > 0 ? invoiceHistory.map(inv => (
                     <div 
                       key={inv.id}
                       onClick={() => loadInvoiceFromHistory(inv)}
