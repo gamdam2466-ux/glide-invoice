@@ -13,7 +13,8 @@ import {
   Save,
   CheckCircle2,
   ChevronRight,
-  History
+  History,
+  Copy
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -25,6 +26,7 @@ interface Student {
   email: string;
   phone: string;
   rate: number;
+  credit?: number;
 }
 
 interface Lesson {
@@ -32,6 +34,10 @@ interface Lesson {
   date: string;
   time: string;
   duration: string;
+  type: 'Single' | '6-Week Cycle' | 'Credit';
+  cycleDates?: string[];
+  name?: string;
+  creditAmount?: number;
 }
 
 interface InvoiceData {
@@ -48,22 +54,30 @@ interface InvoiceData {
   amount: number;
   coachName: string;
   coachEmail: string;
+  coachAbn: string;
+  term: string;
+  rate: number;
+  appliedCredit?: number;
+  savedAt?: string;
 }
 
 const DEFAULT_COACH_NAME = "Skating Coach";
 const DEFAULT_COACH_EMAIL = "coach@example.com";
+const DEFAULT_COACH_ABN = "28181651474";
 
 type View = 'invoice' | 'students';
 
 export default function App() {
   const [view, setView] = useState<View>('invoice');
   const [students, setStudents] = useState<Student[]>([]);
+  const [invoiceHistory, setInvoiceHistory] = useState<InvoiceData[]>([]);
   const [newStudent, setNewStudent] = useState<Partial<Student>>({
     name: '',
     parentName: '',
     email: '',
     phone: '',
-    rate: 50
+    rate: 110,
+    credit: 0
   });
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
   
@@ -77,21 +91,28 @@ export default function App() {
       id: Date.now().toString(),
       date: new Date().toISOString().split('T')[0],
       time: '10:00',
-      duration: '60 min'
+      duration: '60 min',
+      type: 'Single',
+      name: 'Private Ice Skating Lesson'
     }],
     dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    billingCycle: 'Weekly',
+    billingCycle: '6-week',
     notes: 'Thank you for the lesson!',
-    paymentMethod: 'Venmo / Zelle',
-    amount: 50,
+    paymentMethod: "Commonwealth Bank Australia\nWong Wing Nam\nBSB: 063-097\nAccount: 7273 8289\nPayID: 0405272775\nCash",
+    amount: 110,
     coachName: DEFAULT_COACH_NAME,
     coachEmail: DEFAULT_COACH_EMAIL,
+    coachAbn: DEFAULT_COACH_ABN,
+    term: 'Term 1.1',
+    rate: 110,
+    appliedCredit: 0
   });
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingImg, setIsGeneratingImg] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const invoiceRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const jsonFileInputRef = useRef<HTMLInputElement>(null);
 
   // Load students from localStorage
   useEffect(() => {
@@ -109,7 +130,7 @@ export default function App() {
           parentName: '',
           email: '',
           phone: '',
-          rate: 50
+          rate: 110
         }));
         setStudents(migrated);
       }
@@ -117,8 +138,25 @@ export default function App() {
     
     const savedCoach = localStorage.getItem('skating_coach_info');
     if (savedCoach) {
-      const { name, email } = JSON.parse(savedCoach);
-      setInvoice(prev => ({ ...prev, coachName: name, coachEmail: email }));
+      const { name, email, abn } = JSON.parse(savedCoach);
+      setInvoice(prev => ({ 
+        ...prev, 
+        coachName: name || DEFAULT_COACH_NAME, 
+        coachEmail: email || DEFAULT_COACH_EMAIL,
+        coachAbn: abn || DEFAULT_COACH_ABN 
+      }));
+    }
+
+    const savedHistory = localStorage.getItem('skating_invoice_history');
+    if (savedHistory) {
+      const parsed = JSON.parse(savedHistory) as InvoiceData[];
+      const todayStr = new Date().toDateString();
+      const todaysInvoices = parsed.filter((inv: any) => {
+        const savedDate = inv.savedAt ? new Date(inv.savedAt).toDateString() : todayStr;
+        return savedDate === todayStr;
+      });
+      setInvoiceHistory(todaysInvoices);
+      localStorage.setItem('skating_invoice_history', JSON.stringify(todaysInvoices));
     }
   }, []);
 
@@ -140,7 +178,8 @@ export default function App() {
         parentName: newStudent.parentName || '',
         email: newStudent.email || '',
         phone: newStudent.phone || '',
-        rate: newStudent.rate || 50,
+        rate: newStudent.rate || 110,
+        credit: newStudent.credit || 0
       };
       setStudents([...students, student]);
     }
@@ -150,7 +189,8 @@ export default function App() {
       parentName: '',
       email: '',
       phone: '',
-      rate: 50
+      rate: 110,
+      credit: 0
     });
   };
 
@@ -180,7 +220,7 @@ export default function App() {
         const line = lines[i].trim();
         if (!line) continue;
         
-        const [name, parentName, email, phone, rate] = line.split(',').map(s => s.trim());
+        const [name, parentName, email, phone, rate, credit] = line.split(',').map(s => s.trim());
         if (name) {
           newStudents.push({
             id: (Date.now() + i).toString(),
@@ -188,7 +228,8 @@ export default function App() {
             parentName: parentName || '',
             email: email || '',
             phone: phone || '',
-            rate: parseFloat(rate) || 50
+            rate: parseFloat(rate) || 110,
+            credit: parseFloat(credit) || 0
           });
         }
       }
@@ -199,24 +240,133 @@ export default function App() {
     reader.readAsText(file);
   };
 
+  const parseDurationToHours = (duration: string): number => {
+    const clean = duration.toLowerCase().trim();
+    const num = parseFloat(clean);
+    if (isNaN(num)) return 1;
+    if (clean.includes('min')) {
+      return num / 60;
+    }
+    return num;
+  };
+
+  const saveInvoiceToHistory = (invToSave: InvoiceData = invoice) => {
+    setInvoiceHistory(prev => {
+      const timestamp = new Date().toISOString();
+      const prepared = {
+        ...invToSave,
+        savedAt: timestamp
+      };
+      
+      const exists = prev.some(inv => inv.id === invToSave.id);
+      let updated;
+      if (exists) {
+        updated = prev.map(inv => inv.id === invToSave.id ? prepared : inv);
+      } else {
+        updated = [prepared, ...prev];
+      }
+      
+      localStorage.setItem('skating_invoice_history', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const exportInvoiceJson = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(invoice, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `Invoice_${(invoice.studentName || 'Draft').replace(/\s+/g, '_')}_${invoice.id}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  const handleJsonImport = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target?.result as string) as InvoiceData;
+        if (!parsed.id || !parsed.lessons) {
+          alert("Invalid invoice JSON format.");
+          return;
+        }
+        const prepared = {
+          ...parsed,
+          coachAbn: parsed.coachAbn || DEFAULT_COACH_ABN,
+          coachName: parsed.coachName || DEFAULT_COACH_NAME,
+          coachEmail: parsed.coachEmail || DEFAULT_COACH_EMAIL,
+        };
+        setInvoice(prepared);
+        saveInvoiceToHistory(prepared);
+        alert("Invoice draft imported successfully!");
+      } catch (err) {
+        alert("Failed to parse JSON file.");
+      }
+    };
+    reader.readAsText(file);
+    if (e.target) e.target.value = '';
+  };
+
+  const calculateTotalAmount = (lessons: Lesson[], rate: number, appliedCredit: number = 0): number => {
+    const subtotal = lessons.reduce((sum, lesson) => {
+      if (lesson.type === 'Credit') {
+        return sum - (lesson.creditAmount || 0);
+      }
+      const hours = parseDurationToHours(lesson.duration);
+      const multiplier = lesson.type === '6-Week Cycle' ? 6 : 1;
+      return sum + (hours * rate * multiplier);
+    }, 0);
+    return Math.max(0, subtotal - appliedCredit);
+  };
+
+  const calculateCycleDates = (startDateStr: string): string[] => {
+    const dates: string[] = [];
+    if (!startDateStr) return dates;
+    const start = new Date(startDateStr);
+    if (isNaN(start.getTime())) return dates;
+    
+    for (let i = 0; i < 6; i++) {
+      const nextDate = new Date(start);
+      nextDate.setDate(start.getDate() + i * 7);
+      dates.push(nextDate.toISOString().split('T')[0]);
+    }
+    return dates;
+  };
+
   const selectStudentForInvoice = (student: Student) => {
-    setInvoice(prev => ({ 
-      ...prev, 
-      studentId: student.id,
-      studentName: student.name,
-      parentName: student.parentName,
-      email: student.email,
-      amount: student.rate * prev.lessons.length // Default to rate * num lessons
-    }));
+    setInvoice(prev => {
+      const newRate = student.rate || 110;
+      return { 
+        ...prev, 
+        studentId: student.id,
+        studentName: student.name,
+        parentName: student.parentName,
+        email: student.email,
+        rate: newRate,
+        appliedCredit: 0,
+        amount: calculateTotalAmount(prev.lessons, newRate, 0)
+      };
+    });
     setView('invoice');
   };
 
   const handleInputChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setInvoice(prev => ({ 
-      ...prev, 
-      [name]: name === 'amount' ? parseFloat(value) || 0 : value 
-    }));
+    setInvoice(prev => {
+      const updated = {
+        ...prev,
+        [name]: name === 'amount' || name === 'rate' || name === 'appliedCredit' ? parseFloat(value) || 0 : value 
+      };
+      if (name === 'rate') {
+        updated.amount = calculateTotalAmount(prev.lessons, parseFloat(value) || 0, prev.appliedCredit);
+      } else if (name === 'appliedCredit') {
+        updated.amount = calculateTotalAmount(prev.lessons, prev.rate, parseFloat(value) || 0);
+      }
+      return updated;
+    });
   };
 
   const addLesson = () => {
@@ -224,17 +374,38 @@ export default function App() {
       id: Date.now().toString(),
       date: new Date().toISOString().split('T')[0],
       time: '10:00',
-      duration: '60 min'
+      duration: '60 min',
+      type: 'Single',
+      name: 'Private Ice Skating Lesson'
     };
     
     setInvoice(prev => {
-      const student = students.find(s => s.id === prev.studentId);
-      const rate = student ? student.rate : 50;
       const newLessons = [...prev.lessons, newLesson];
       return {
         ...prev,
         lessons: newLessons,
-        amount: rate * newLessons.length // Auto-update amount
+        amount: calculateTotalAmount(newLessons, prev.rate, prev.appliedCredit)
+      };
+    });
+  };
+
+  const duplicateLesson = (id: string) => {
+    setInvoice(prev => {
+      const lessonToCopy = prev.lessons.find(l => l.id === id);
+      if (!lessonToCopy) return prev;
+      
+      const duplicated: Lesson = {
+        ...lessonToCopy,
+        id: (Date.now() + Math.random()).toString(),
+      };
+      const index = prev.lessons.findIndex(l => l.id === id);
+      const newLessons = [...prev.lessons];
+      newLessons.splice(index + 1, 0, duplicated);
+      
+      return {
+        ...prev,
+        lessons: newLessons,
+        amount: calculateTotalAmount(newLessons, prev.rate, prev.appliedCredit)
       };
     });
   };
@@ -242,28 +413,54 @@ export default function App() {
   const removeLesson = (id: string) => {
     if (invoice.lessons.length <= 1) return;
     setInvoice(prev => {
-      const student = students.find(s => s.id === prev.studentId);
-      const rate = student ? student.rate : 50;
       const newLessons = prev.lessons.filter(l => l.id !== id);
       return {
         ...prev,
         lessons: newLessons,
-        amount: rate * newLessons.length // Auto-update amount
+        amount: calculateTotalAmount(newLessons, prev.rate, prev.appliedCredit)
       };
     });
   };
 
-  const updateLesson = (id: string, field: keyof Lesson, value: string) => {
-    setInvoice(prev => ({
-      ...prev,
-      lessons: prev.lessons.map(l => l.id === id ? { ...l, [field]: value } : l)
-    }));
+  const updateLesson = (id: string, field: keyof Lesson, value: any) => {
+    setInvoice(prev => {
+      const newLessons = prev.lessons.map(l => {
+        if (l.id !== id) return l;
+        const updatedLesson = { ...l, [field]: value };
+        if (field === 'type') {
+          if (value === '6-Week Cycle') {
+            updatedLesson.cycleDates = calculateCycleDates(updatedLesson.date);
+            if (!l.name || l.name === 'Private Ice Skating Lesson' || l.name === 'Sickness Credit') {
+              updatedLesson.name = '6-week Private Lesson Package';
+            }
+          } else if (value === 'Single') {
+            if (!l.name || l.name === '6-week Private Lesson Package' || l.name === 'Sickness Credit') {
+              updatedLesson.name = 'Private Ice Skating Lesson';
+            }
+          } else if (value === 'Credit') {
+            updatedLesson.creditAmount = 50;
+            if (!l.name || l.name === 'Private Ice Skating Lesson' || l.name === '6-week Private Lesson Package') {
+              updatedLesson.name = 'Sickness Credit';
+            }
+          }
+        } else if (field === 'date' && l.type === '6-Week Cycle') {
+          updatedLesson.cycleDates = calculateCycleDates(value);
+        }
+        return updatedLesson;
+      });
+      return {
+        ...prev,
+        lessons: newLessons,
+        amount: calculateTotalAmount(newLessons, prev.rate, prev.appliedCredit)
+      };
+    });
   };
 
   const saveCoachInfo = () => {
     localStorage.setItem('skating_coach_info', JSON.stringify({
       name: invoice.coachName,
-      email: invoice.coachEmail
+      email: invoice.coachEmail,
+      abn: invoice.coachAbn
     }));
     setShowSuccess(true);
     setTimeout(() => setShowSuccess(false), 3000);
@@ -285,6 +482,8 @@ export default function App() {
       link.download = `Invoice_${invoice.studentName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.png`;
       link.href = dataUrl;
       link.click();
+      
+      saveInvoiceToHistory(invoice);
       
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
@@ -315,6 +514,8 @@ export default function App() {
       
       pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
       pdf.save(`Invoice_${invoice.studentName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`);
+      
+      saveInvoiceToHistory(invoice);
       
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
@@ -401,14 +602,26 @@ export default function App() {
                       placeholder="555-0123"
                     />
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Hourly Rate ($)</label>
-                    <input 
-                      type="number" 
-                      value={newStudent.rate}
-                      onChange={(e) => setNewStudent(prev => ({ ...prev, rate: parseFloat(e.target.value) }))}
-                      className="w-full px-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-blue-500 transition-all"
-                    />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Hourly Rate ($)</label>
+                      <input 
+                        type="number" 
+                        value={newStudent.rate}
+                        onChange={(e) => setNewStudent(prev => ({ ...prev, rate: parseFloat(e.target.value) || 0 }))}
+                        className="w-full px-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-blue-500 transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Saved Credit ($)</label>
+                      <input 
+                        type="number" 
+                        value={newStudent.credit}
+                        onChange={(e) => setNewStudent(prev => ({ ...prev, credit: parseFloat(e.target.value) || 0 }))}
+                        className="w-full px-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-blue-500 transition-all"
+                        placeholder="0"
+                      />
+                    </div>
                   </div>
                   <button 
                     onClick={addOrUpdateStudent}
@@ -420,7 +633,7 @@ export default function App() {
                     <button 
                       onClick={() => {
                         setEditingStudentId(null);
-                        setNewStudent({ name: '', parentName: '', email: '', phone: '', rate: 50 });
+                        setNewStudent({ name: '', parentName: '', email: '', phone: '', rate: 110, credit: 0 });
                       }}
                       className="w-full py-2 text-slate-500 font-medium"
                     >
@@ -464,6 +677,7 @@ export default function App() {
                         <th className="pb-4 text-xs font-bold text-slate-400 uppercase">Parent</th>
                         <th className="pb-4 text-xs font-bold text-slate-400 uppercase">Contact</th>
                         <th className="pb-4 text-xs font-bold text-slate-400 uppercase">Rate</th>
+                        <th className="pb-4 text-xs font-bold text-slate-400 uppercase">Credit</th>
                         <th className="pb-4 text-xs font-bold text-slate-400 uppercase text-right">Actions</th>
                       </tr>
                     </thead>
@@ -484,6 +698,15 @@ export default function App() {
                             <div className="text-xs text-slate-400">{student.phone}</div>
                           </td>
                           <td className="py-4 font-semibold text-slate-700">${student.rate}/hr</td>
+                          <td className="py-4">
+                            {student.credit && student.credit > 0 ? (
+                              <span className="px-2 py-0.5 bg-green-50 text-green-700 rounded-full font-bold text-xs">
+                                ${student.credit}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 font-semibold text-sm">$0</span>
+                            )}
+                          </td>
                           <td className="py-4 text-right space-x-2">
                             <button 
                               onClick={() => editStudent(student)}
@@ -526,7 +749,7 @@ export default function App() {
                   </div>
                   <h2 className="text-lg font-semibold">Coach Profile</h2>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-xs font-medium text-slate-500 uppercase mb-1">Your Name</label>
                     <input 
@@ -543,6 +766,16 @@ export default function App() {
                       type="email" 
                       name="coachEmail"
                       value={invoice.coachEmail}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-blue-500 transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 uppercase mb-1">Your ABN</label>
+                    <input 
+                      type="text" 
+                      name="coachAbn"
+                      value={invoice.coachAbn}
                       onChange={handleInputChange}
                       className="w-full px-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-blue-500 transition-all"
                     />
@@ -594,6 +827,127 @@ export default function App() {
                 </div>
               </section>
 
+              {/* Saved Invoices (Retrace Work) */}
+              <section className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 bg-green-50 rounded-lg flex items-center justify-center">
+                      <History className="w-4 h-4 text-green-600" />
+                    </div>
+                    <h2 className="text-lg font-semibold">Today's Invoices</h2>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setInvoice({
+                        id: `INV-${Date.now()}`,
+                        studentId: '',
+                        studentName: '',
+                        parentName: '',
+                        email: '',
+                        lessons: [{
+                          id: Date.now().toString(),
+                          date: new Date().toISOString().split('T')[0],
+                          time: '10:00',
+                          duration: '60 min',
+                          type: 'Single',
+                          name: 'Private Ice Skating Lesson'
+                        }],
+                        dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                        billingCycle: '6-week',
+                        notes: 'Thank you for the lesson!',
+                        paymentMethod: "Commonwealth Bank Australia\nWong Wing Nam\nBSB: 063-097\nAccount: 7273 8289\nPayID: 0405272775\nCash",
+                        amount: 110,
+                        coachName: invoice.coachName || DEFAULT_COACH_NAME,
+                        coachEmail: invoice.coachEmail || DEFAULT_COACH_EMAIL,
+                        coachAbn: invoice.coachAbn || DEFAULT_COACH_ABN,
+                        term: 'Term 1.1',
+                        rate: 110,
+                        appliedCredit: 0
+                      });
+                    }}
+                    className="text-xs font-bold text-blue-600 hover:underline"
+                  >
+                    + New Invoice
+                  </button>
+                </div>
+                
+                <div className="space-y-2 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+                  {invoiceHistory.map((inv) => {
+                    const formattedTime = inv.savedAt 
+                      ? new Date(inv.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                      : 'Recently';
+                    return (
+                      <div 
+                        key={inv.id} 
+                        className={`flex items-center justify-between p-3 rounded-2xl border transition-all ${
+                          invoice.id === inv.id 
+                            ? 'bg-blue-50 border-blue-200' 
+                            : 'bg-white border-slate-100 hover:border-slate-200'
+                        }`}
+                      >
+                        <div className="cursor-pointer flex-grow" onClick={() => setInvoice(inv)}>
+                          <div className="font-bold text-slate-800 text-sm">{inv.studentName || 'Draft Invoice'}</div>
+                          <div className="text-xs text-slate-400 flex items-center gap-2 mt-0.5">
+                            <span>{inv.id}</span>
+                            <span>•</span>
+                            <span>{formattedTime}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-700 text-sm">${Number(inv.amount).toFixed(2)}</span>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setInvoiceHistory(prev => {
+                                const filtered = prev.filter(i => i.id !== inv.id);
+                                localStorage.setItem('skating_invoice_history', JSON.stringify(filtered));
+                                return filtered;
+                              });
+                            }}
+                            className="p-1 text-slate-400 hover:text-red-500 rounded transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {invoiceHistory.length === 0 && (
+                    <p className="text-sm text-slate-400 italic">No invoices recorded today yet. Download a PDF/Image or click "Save Draft" to record.</p>
+                  )}
+                </div>
+                <input 
+                  type="file" 
+                  accept=".json"
+                  ref={jsonFileInputRef}
+                  onChange={handleJsonImport}
+                  className="hidden"
+                />
+
+                <button 
+                  onClick={() => saveInvoiceToHistory(invoice)}
+                  className="w-full mt-3 py-2 bg-slate-50 border border-slate-200 text-slate-600 rounded-xl text-xs font-semibold hover:bg-slate-100 transition-all flex items-center justify-center gap-1.5"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  Save Current Draft
+                </button>
+
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <button 
+                    onClick={exportInvoiceJson}
+                    className="py-1.5 bg-slate-50 border border-slate-200 text-slate-600 rounded-xl text-[11px] font-bold hover:bg-slate-100 transition-all flex items-center justify-center gap-1"
+                  >
+                    Export JSON
+                  </button>
+                  <button 
+                    onClick={() => jsonFileInputRef.current?.click()}
+                    className="py-1.5 bg-slate-50 border border-slate-200 text-slate-600 rounded-xl text-[11px] font-bold hover:bg-slate-100 transition-all flex items-center justify-center gap-1"
+                  >
+                    Import JSON
+                  </button>
+                </div>
+              </section>
+
               {/* Invoice Details Form */}
               <section className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 space-y-6">
                 <div className="flex items-center gap-2 mb-2">
@@ -626,12 +980,42 @@ export default function App() {
                     />
                   </div>
                   <div>
+                    <label className="block text-xs font-medium text-slate-500 uppercase mb-1">Hourly Rate ($/hr)</label>
+                    <input 
+                      type="number" 
+                      name="rate"
+                      value={invoice.rate}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500 transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 uppercase mb-1">Term of Year</label>
+                    <select
+                      name="term"
+                      value={invoice.term}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500 transition-all text-sm font-semibold"
+                    >
+                      <option value="Term 1.1">Term 1.1</option>
+                      <option value="Term 1.2">Term 1.2</option>
+                      <option value="Term 2.1">Term 2.1</option>
+                      <option value="Term 2.2">Term 2.2</option>
+                      <option value="Term 3.1">Term 3.1</option>
+                      <option value="Term 3.2">Term 3.2</option>
+                      <option value="Term 4.1">Term 4.1</option>
+                      <option value="Term 4.2">Term 4.2</option>
+                      <option value="Holiday Term">Holiday Term</option>
+                    </select>
+                  </div>
+                  <div>
                     <label className="block text-xs font-medium text-slate-500 uppercase mb-1">Due Date</label>
                     <input 
-                      type="date" 
+                      type="text" 
                       name="dueDate"
                       value={invoice.dueDate}
                       onChange={handleInputChange}
+                      placeholder="e.g. 2026-05-28 or Upon Receipt"
                       className="w-full px-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500 transition-all"
                     />
                   </div>
@@ -646,6 +1030,7 @@ export default function App() {
                       className="w-full px-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500 transition-all"
                     />
                   </div>
+
                 </div>
 
                 {/* Lessons List Editor */}
@@ -661,62 +1046,153 @@ export default function App() {
                   </div>
                   
                   <div className="space-y-3">
-                    {invoice.lessons.map((lesson, index) => (
-                      <div key={lesson.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 relative group">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Date</label>
+                    {invoice.lessons.map((lesson, index) => {
+                      const isCredit = lesson.type === 'Credit';
+                      return (
+                        <div key={lesson.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 relative group">
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Type</label>
+                              <select 
+                                value={lesson.type || 'Single'}
+                                onChange={(e) => updateLesson(lesson.id, 'type', e.target.value)}
+                                className="w-full px-2 py-1 bg-white border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500 font-semibold"
+                              >
+                                <option value="Single">Single Lesson</option>
+                                <option value="6-Week Cycle">6-Week Cycle</option>
+                                <option value="Credit">Credit/Deduction</option>
+                              </select>
+                            </div>
+                            {isCredit ? (
+                              <>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Credit Date</label>
+                                  <input 
+                                    type="date" 
+                                    value={lesson.date}
+                                    onChange={(e) => updateLesson(lesson.id, 'date', e.target.value)}
+                                    className="w-full px-2 py-1 bg-white border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Credit Amount ($)</label>
+                                  <input 
+                                    type="number" 
+                                    value={lesson.creditAmount || 0}
+                                    onChange={(e) => updateLesson(lesson.id, 'creditAmount', parseFloat(e.target.value) || 0)}
+                                    className="w-full px-2 py-1 bg-white border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500 font-semibold"
+                                  />
+                                </div>
+                                <div></div> {/* Spacer */}
+                              </>
+                            ) : (
+                              <>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">{lesson.type === '6-Week Cycle' ? 'Start Date' : 'Date'}</label>
+                                  <input 
+                                    type="date" 
+                                    value={lesson.date}
+                                    onChange={(e) => updateLesson(lesson.id, 'date', e.target.value)}
+                                    className="w-full px-2 py-1 bg-white border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Time</label>
+                                  <input 
+                                    type="time" 
+                                    value={lesson.time}
+                                    onChange={(e) => updateLesson(lesson.id, 'time', e.target.value)}
+                                    className="w-full px-2 py-1 bg-white border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Duration</label>
+                                  <select
+                                    value={lesson.duration}
+                                    onChange={(e) => updateLesson(lesson.id, 'duration', e.target.value)}
+                                    className="w-full px-2 py-1 bg-white border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500 font-semibold"
+                                  >
+                                    <option value="15 min">15 min</option>
+                                    <option value="30 min">30 min</option>
+                                    <option value="45 min">45 min</option>
+                                    <option value="60 min">60 min (1 hr)</option>
+                                    <option value="90 min">90 min (1.5 hr)</option>
+                                    <option value="120 min">120 min (2 hr)</option>
+                                  </select>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                          
+                          <div className="mt-3">
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                              {isCredit ? 'Credit Description / Reason' : 'Lesson Name on Invoice'}
+                            </label>
                             <input 
-                              type="date" 
-                              value={lesson.date}
-                              onChange={(e) => updateLesson(lesson.id, 'date', e.target.value)}
-                              className="w-full px-2 py-1 bg-white border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                              type="text"
+                              value={lesson.name || ''}
+                              onChange={(e) => updateLesson(lesson.id, 'name', e.target.value)}
+                              placeholder={isCredit ? 'e.g. Sickness Credit, Make-up Credit' : lesson.type === '6-Week Cycle' ? '6-week Private Lesson Package' : 'Private Ice Skating Lesson'}
+                              className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 font-medium"
                             />
                           </div>
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Time</label>
-                            <input 
-                              type="time" 
-                              value={lesson.time}
-                              onChange={(e) => updateLesson(lesson.id, 'time', e.target.value)}
-                              className="w-full px-2 py-1 bg-white border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-                            />
+
+                        {lesson.type === '6-Week Cycle' && lesson.cycleDates && (
+                          <div className="mt-3 pt-3 border-t border-slate-200">
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Cycle Weekly Dates (Auto-Generated)</label>
+                            <div className="grid grid-cols-3 gap-2">
+                              {lesson.cycleDates.map((cDate, dIndex) => (
+                                <input
+                                  key={dIndex}
+                                  type="date"
+                                  value={cDate}
+                                  onChange={(e) => {
+                                    const newDates = [...(lesson.cycleDates || [])];
+                                    newDates[dIndex] = e.target.value;
+                                    updateLesson(lesson.id, 'cycleDates', newDates);
+                                  }}
+                                  className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs text-slate-600 focus:ring-2 focus:ring-blue-500"
+                                />
+                              ))}
+                            </div>
                           </div>
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Duration</label>
-                            <input 
-                              type="text" 
-                              value={lesson.duration}
-                              onChange={(e) => updateLesson(lesson.id, 'duration', e.target.value)}
-                              placeholder="e.g. 60 min"
-                              className="w-full px-2 py-1 bg-white border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-                            />
-                          </div>
-                        </div>
-                        {invoice.lessons.length > 1 && (
-                          <button 
-                            onClick={() => removeLesson(lesson.id)}
-                            className="absolute -right-2 -top-2 p-1 bg-white border border-slate-200 text-red-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
                         )}
+
+                        <div className="absolute right-2 -top-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button 
+                            type="button"
+                            onClick={() => duplicateLesson(lesson.id)}
+                            title="Duplicate Lesson Session"
+                            className="p-1.5 bg-white border border-slate-200 text-blue-600 rounded-full shadow-sm hover:bg-slate-50 transition-colors"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </button>
+                          {invoice.lessons.length > 1 && (
+                            <button 
+                              type="button"
+                              onClick={() => removeLesson(lesson.id)}
+                              title="Delete Lesson Session"
+                              className="p-1.5 bg-white border border-slate-200 text-red-500 rounded-full shadow-sm hover:bg-slate-50 transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
-                    ))}
+                    )})}`
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-medium text-slate-500 uppercase mb-1">Payment Method</label>
                   <div className="relative">
-                    <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                    <input 
-                      type="text" 
+                    <CreditCard className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                    <textarea 
                       name="paymentMethod"
                       value={invoice.paymentMethod}
                       onChange={handleInputChange}
-                      placeholder="e.g. Venmo: @coach-skate"
-                      className="w-full pl-10 pr-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500 transition-all"
+                      rows={4}
+                      className="w-full pl-10 pr-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500 transition-all resize-none"
                     />
                   </div>
                 </div>
@@ -818,6 +1294,9 @@ export default function App() {
                 <div className="text-right" style={{ textAlign: 'right' }}>
                   <h4 className="font-bold text-xl" style={{ color: '#1e293b', margin: 0 }}>{invoice.coachName}</h4>
                   <p className="text-sm" style={{ color: '#64748b', margin: 0 }}>{invoice.coachEmail}</p>
+                  {invoice.coachAbn && (
+                    <p className="text-xs mt-0.5" style={{ color: '#64748b', margin: 0, whiteSpace: 'nowrap' }}>ABN: {invoice.coachAbn}</p>
+                  )}
                 </div>
               </div>
 
@@ -837,51 +1316,95 @@ export default function App() {
                     {invoice.email}
                   </p>
                 </div>
-                <div className="grid grid-cols-2 gap-4" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#94a3b8', margin: 0 }}>Cycle</p>
-                    <p className="font-semibold" style={{ color: '#334155', margin: 0 }}>{invoice.billingCycle}</p>
+                <div className="grid grid-cols-3 gap-4" style={{ display: 'grid', gridTemplateColumns: 'auto auto auto', gap: '1.5rem', justifyContent: 'end', textAlign: 'right' }}>
+                  <div style={{ whiteSpace: 'nowrap' }}>
+                    <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#94a3b8', margin: 0 }}>Term</p>
+                    <p className="font-semibold text-sm" style={{ color: '#334155', margin: 0 }}>{invoice.term}</p>
                   </div>
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#94a3b8', margin: 0 }}>Due Date</p>
-                    <p className="font-semibold" style={{ color: '#334155', margin: 0 }}>{invoice.dueDate}</p>
+                  <div style={{ whiteSpace: 'nowrap' }}>
+                    <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#94a3b8', margin: 0 }}>Cycle</p>
+                    <p className="font-semibold text-sm" style={{ color: '#334155', margin: 0 }}>{invoice.billingCycle}</p>
+                  </div>
+                  <div style={{ whiteSpace: 'nowrap' }}>
+                    <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#ef4444', margin: 0 }}>Due Date</p>
+                    <p className="font-bold text-sm" style={{ color: '#ef4444', margin: 0 }}>{invoice.dueDate}</p>
                   </div>
                 </div>
               </div>
 
               {/* Table Header */}
-              <div className="pb-4 mb-4 grid grid-cols-12 gap-4" style={{ borderBottom: '2px solid #f1f5f9', display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '1rem' }}>
-                <div className="col-span-6 text-xs font-bold uppercase tracking-wider" style={{ color: '#94a3b8', gridColumn: 'span 6 / span 6' }}>Lesson Description</div>
-                <div className="col-span-3 text-xs font-bold uppercase tracking-wider text-right" style={{ color: '#94a3b8', gridColumn: 'span 3 / span 3', textAlign: 'right' }}>Time</div>
-                <div className="col-span-3 text-xs font-bold uppercase tracking-wider text-right" style={{ color: '#94a3b8', gridColumn: 'span 3 / span 3', textAlign: 'right' }}>Duration</div>
+              <div className="pb-4 mb-4" style={{ borderBottom: '2px solid #f1f5f9', display: 'grid', gridTemplateColumns: '6.5fr 1.5fr 2fr 2fr', gap: '1rem' }}>
+                <div className="text-xs font-bold uppercase tracking-wider" style={{ color: '#94a3b8' }}>Lesson Description</div>
+                <div className="text-xs font-bold uppercase tracking-wider text-right" style={{ color: '#94a3b8', textAlign: 'right' }}>Time</div>
+                <div className="text-xs font-bold uppercase tracking-wider text-right" style={{ color: '#94a3b8', textAlign: 'right' }}>Duration</div>
+                <div className="text-xs font-bold uppercase tracking-wider text-right" style={{ color: '#94a3b8', textAlign: 'right' }}>Amount</div>
               </div>
 
               {/* Table Rows */}
               <div className="space-y-4">
-                {invoice.lessons.map((lesson) => (
-                  <div key={lesson.id} className="grid grid-cols-12 gap-4 py-2 items-center" style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '1rem', alignItems: 'center' }}>
-                    <div className="col-span-6" style={{ gridColumn: 'span 6 / span 6' }}>
-                      <h6 className="font-bold" style={{ color: '#1e293b', margin: 0 }}>Private Ice Skating Lesson</h6>
-                      <p className="text-sm flex items-center gap-1 mt-1" style={{ color: '#64748b', margin: 0, display: 'flex', alignItems: 'center' }}>
-                        <Calendar className="w-3 h-3" style={{ color: '#64748b' }} /> {lesson.date}
-                      </p>
+                {invoice.lessons.map((lesson) => {
+                  const isCredit = lesson.type === 'Credit';
+                  const isCycle = lesson.type === '6-Week Cycle';
+                  const hours = parseDurationToHours(lesson.duration);
+                  const multiplier = isCycle ? 6 : 1;
+                  const lessonAmount = isCredit ? -(lesson.creditAmount || 0) : (hours * invoice.rate * multiplier);
+
+                  return (
+                    <div key={lesson.id} className="py-3" style={{ borderBottom: '1px solid #f8fafc', display: 'grid', gridTemplateColumns: '6.5fr 1.5fr 2fr 2fr', gap: '1rem', alignItems: 'center' }}>
+                      <div>
+                        <h6 className="font-bold" style={{ color: '#1e293b', margin: 0, fontSize: '0.95rem' }}>
+                          {lesson.name || (isCredit ? 'Credit Deduction' : isCycle ? '6-week Private Lesson Package' : 'Private Ice Skating Lesson')}
+                        </h6>
+                        {isCredit ? (
+                          <p className="text-xs flex items-center gap-1 mt-1.5" style={{ color: '#64748b', margin: 0, display: 'flex', alignItems: 'center' }}>
+                            <Calendar className="w-3.5 h-3.5 text-blue-500" />
+                            <span>Date: {lesson.date}</span>
+                          </p>
+                        ) : !isCycle ? (
+                          <p className="text-xs flex items-center gap-1 mt-1.5" style={{ color: '#64748b', margin: 0, display: 'flex', alignItems: 'center' }}>
+                            <Calendar className="w-3.5 h-3.5 text-blue-500" />
+                            <span>{lesson.date}</span>
+                          </p>
+                        ) : (
+                          <div style={{ marginTop: '0.5rem' }}>
+                            <p className="text-xs font-semibold" style={{ color: '#334155', margin: 0 }}>
+                              6 sessions starting {lesson.date}:
+                            </p>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.4rem', borderLeft: '2px solid #3b82f6', paddingLeft: '0.5rem' }}>
+                              {lesson.cycleDates?.map((cDate, idx) => (
+                                <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', color: '#475569' }}>
+                                  <Calendar className="w-3 h-3 text-blue-500" style={{ flexShrink: 0 }} />
+                                  <span>Week {idx + 1}: {cDate}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-right font-medium text-sm" style={{ color: '#475569', textAlign: 'right' }}>
+                        {isCredit ? '-' : lesson.time}
+                      </div>
+                      <div className="text-right font-semibold text-sm" style={{ color: '#334155', textAlign: 'right' }}>
+                        {isCredit ? '-' : lesson.duration} {isCycle && <span style={{ color: '#3b82f6', fontSize: '0.8rem' }}>× 6</span>}
+                      </div>
+                      <div className="text-right font-bold text-sm" style={{ color: '#1e293b', textAlign: 'right' }}>
+                        {isCredit ? `-$${Number(lesson.creditAmount || 0).toFixed(2)}` : `$${Number(lessonAmount).toFixed(2)}`}
+                      </div>
                     </div>
-                    <div className="col-span-3 text-right font-medium" style={{ color: '#475569', gridColumn: 'span 3 / span 3', textAlign: 'right' }}>{lesson.time}</div>
-                    <div className="col-span-3 text-right font-bold" style={{ color: '#1e293b', gridColumn: 'span 3 / span 3', textAlign: 'right' }}>{lesson.duration}</div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Spacer */}
               <div style={{ flexGrow: 1 }}></div>
 
               {/* Footer Section */}
-              <div className="mt-12 pt-8 grid grid-cols-12 gap-8" style={{ borderTop: '2px solid #f8fafc', display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '2rem' }}>
-                <div className="col-span-7" style={{ gridColumn: 'span 7 / span 7' }}>
+              <div className="mt-12 pt-8" style={{ borderTop: '2px solid #f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'stretch' }}>
+                <div style={{ width: '56%', flexShrink: 0, flexGrow: 0 }}>
                   <div className="mb-6">
                     <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#94a3b8', margin: 0 }}>Payment Instructions</p>
                     <div className="p-4 rounded-2xl" style={{ backgroundColor: '#f8fafc', border: '1px solid #f1f5f9' }}>
-                      <p className="text-sm font-semibold" style={{ color: '#334155', margin: 0 }}>{invoice.paymentMethod}</p>
+                      <p className="text-sm font-semibold" style={{ color: '#334155', margin: 0, whiteSpace: 'pre-line' }}>{invoice.paymentMethod}</p>
                     </div>
                   </div>
                   <div>
@@ -891,10 +1414,28 @@ export default function App() {
                     </p>
                   </div>
                 </div>
-                <div className="col-span-5" style={{ gridColumn: 'span 5 / span 5' }}>
-                  <div className="rounded-3xl p-6 text-right" style={{ backgroundColor: '#2563eb', color: '#ffffff', textAlign: 'right' }}>
-                    <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#bfdbfe', margin: 0 }}>Total Amount Due</p>
-                    <h2 className="text-4xl font-black" style={{ margin: 0 }}>${Number(invoice.amount).toFixed(2)}</h2>
+                <div style={{ width: '40%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', flexShrink: 0, flexGrow: 0 }}>
+                  <div className="rounded-3xl p-6 text-center" style={{ 
+                    backgroundColor: '#2563eb', 
+                    color: '#ffffff', 
+                    textAlign: 'center',
+                    minHeight: '160px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    alignItems: 'stretch'
+                  }}>
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#bfdbfe', margin: 0 }}>Total Amount Due</p>
+                    </div>
+                    <div style={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0.5rem 0' }}>
+                      <h2 className="text-4xl font-black" style={{ margin: 0, lineHeight: 1 }}>${Number(invoice.amount).toFixed(2)}</h2>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium" style={{ color: '#bfdbfe', margin: 0 }}>
+                        (Includes 10% GST of ${(Number(invoice.amount) / 11).toFixed(2)})
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
