@@ -41,6 +41,7 @@ interface Lesson {
   cycleDates?: string[];
   name?: string;
   creditAmount?: number;
+  customPrice?: number;
 }
 
 interface InvoiceData {
@@ -424,6 +425,9 @@ export default function App() {
     const subtotal = lessons.reduce((sum, lesson) => {
       if (lesson.type === 'Credit') {
         return sum - (lesson.creditAmount || 0);
+      }
+      if (lesson.customPrice !== undefined) {
+        return sum + lesson.customPrice;
       }
       const hours = parseDurationToHours(lesson.duration);
       const multiplier = lesson.type === '6-Week Cycle' ? 6 : 1;
@@ -1282,9 +1286,10 @@ export default function App() {
                   <div className="space-y-3">
                     {invoice.lessons.map((lesson, index) => {
                       const isCredit = lesson.type === 'Credit';
+                      const calculatedPrice = parseDurationToHours(lesson.duration) * invoice.rate * (lesson.type === '6-Week Cycle' ? 6 : 1);
                       return (
                         <div key={lesson.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 relative group">
-                          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                          <div className={`grid grid-cols-1 ${isCredit ? 'md:grid-cols-4' : 'md:grid-cols-5'} gap-3`}>
                             <div>
                               <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Type</label>
                               <select 
@@ -1353,6 +1358,44 @@ export default function App() {
                                     <option value="90 min">90 min (1.5 hr)</option>
                                     <option value="120 min">120 min (2 hr)</option>
                                   </select>
+                                </div>
+                                <div>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <label className="block text-[10px] font-bold text-slate-400 uppercase">Price ($)</label>
+                                    {lesson.customPrice !== undefined ? (
+                                      <button 
+                                        type="button"
+                                        onClick={() => updateLesson(lesson.id, 'customPrice', undefined)}
+                                        className="text-[9px] font-extrabold text-blue-500 hover:text-blue-700 bg-blue-50 px-1 py-0.5 rounded transition-all"
+                                        title="Reset to automatically calculated price"
+                                      >
+                                        Auto
+                                      </button>
+                                    ) : (
+                                      <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded">
+                                        Auto
+                                      </span>
+                                    )}
+                                  </div>
+                                  <input 
+                                    type="number" 
+                                    step="0.01"
+                                    value={lesson.customPrice !== undefined ? lesson.customPrice : ''}
+                                    placeholder={calculatedPrice.toFixed(2)}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      if (val === '') {
+                                        updateLesson(lesson.id, 'customPrice', undefined);
+                                      } else {
+                                        updateLesson(lesson.id, 'customPrice', parseFloat(val) || 0);
+                                      }
+                                    }}
+                                    className={`w-full px-2 py-1 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 font-semibold transition-all duration-200 border ${
+                                      lesson.customPrice !== undefined 
+                                        ? 'text-blue-600 border-blue-300 bg-blue-50/50 placeholder-blue-300 focus:bg-white' 
+                                        : 'text-slate-700 border-transparent bg-white placeholder-slate-400'
+                                    }`}
+                                  />
                                 </div>
                               </>
                             )}
@@ -1592,7 +1635,9 @@ export default function App() {
                   const isCycle = lesson.type === '6-Week Cycle';
                   const hours = parseDurationToHours(lesson.duration);
                   const multiplier = isCycle ? 6 : 1;
-                  const lessonAmount = isCredit ? -(lesson.creditAmount || 0) : (hours * invoice.rate * multiplier);
+                  const lessonAmount = isCredit 
+                    ? -(lesson.creditAmount || 0) 
+                    : (lesson.customPrice !== undefined ? lesson.customPrice : (hours * invoice.rate * multiplier));
 
                   return (
                     <div key={lesson.id} className="py-3" style={{ borderBottom: '1px solid #f8fafc', display: 'grid', gridTemplateColumns: '6.5fr 1.5fr 2fr 2fr', gap: '1rem', alignItems: 'center' }}>
