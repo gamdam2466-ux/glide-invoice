@@ -13,8 +13,7 @@ import {
   Save,
   CheckCircle2,
   ChevronRight,
-  History,
-  Copy
+  History
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -49,7 +48,6 @@ interface InvoiceData {
   amount: number;
   coachName: string;
   coachEmail: string;
-  generatedDate?: string;
 }
 
 const DEFAULT_COACH_NAME = "Skating Coach";
@@ -84,7 +82,7 @@ export default function App() {
     dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     billingCycle: 'Weekly',
     notes: 'Thank you for the lesson!',
-    paymentMethod: 'Commonwealth Bank Australia\nWong Wing Nam\nBSB:063-097\nAccount: 72738289\nPay ID :0405272775\nCash',
+    paymentMethod: 'Venmo / Zelle',
     amount: 50,
     coachName: DEFAULT_COACH_NAME,
     coachEmail: DEFAULT_COACH_EMAIL,
@@ -92,7 +90,6 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingImg, setIsGeneratingImg] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [invoiceHistory, setInvoiceHistory] = useState<InvoiceData[]>([]);
   const invoiceRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -122,21 +119,6 @@ export default function App() {
     if (savedCoach) {
       const { name, email } = JSON.parse(savedCoach);
       setInvoice(prev => ({ ...prev, coachName: name, coachEmail: email }));
-    }
-
-    const savedHistory = localStorage.getItem('skating_invoice_history');
-    if (savedHistory) {
-      try {
-        const parsedHistory = JSON.parse(savedHistory);
-        const today = new Date().toISOString().split('T')[0];
-        const todaysHistory = parsedHistory.filter((inv: any) => inv.generatedDate === today);
-        setInvoiceHistory(todaysHistory);
-        if (parsedHistory.length !== todaysHistory.length) {
-          localStorage.setItem('skating_invoice_history', JSON.stringify(todaysHistory));
-        }
-      } catch (e) {
-        console.error('Error parsing invoice history', e);
-      }
     }
   }, []);
 
@@ -220,12 +202,10 @@ export default function App() {
   const selectStudentForInvoice = (student: Student) => {
     setInvoice(prev => ({ 
       ...prev, 
-      id: `INV-${Date.now()}`,
       studentId: student.id,
       studentName: student.name,
       parentName: student.parentName,
       email: student.email,
-      paymentMethod: 'Commonwealth Bank Australia\nWong Wing Nam\nBSB:063-097\nAccount: 72738289\nPay ID :0405272775\nCash',
       amount: student.rate * prev.lessons.length // Default to rate * num lessons
     }));
     setView('invoice');
@@ -273,28 +253,6 @@ export default function App() {
     });
   };
 
-  const duplicateLesson = (id: string) => {
-    setInvoice(prev => {
-      const lessonToCopy = prev.lessons.find(l => l.id === id);
-      if (!lessonToCopy) return prev;
-      
-      const newLesson = {
-        ...lessonToCopy,
-        id: Date.now().toString()
-      };
-      
-      const student = students.find(s => s.id === prev.studentId);
-      const rate = student ? student.rate : 50;
-      const newLessons = [...prev.lessons, newLesson];
-      
-      return {
-        ...prev,
-        lessons: newLessons,
-        amount: rate * newLessons.length
-      };
-    });
-  };
-
   const updateLesson = (id: string, field: keyof Lesson, value: string) => {
     setInvoice(prev => ({
       ...prev,
@@ -309,22 +267,6 @@ export default function App() {
     }));
     setShowSuccess(true);
     setTimeout(() => setShowSuccess(false), 3000);
-  };
-
-  const saveToHistory = () => {
-    setInvoiceHistory(prev => {
-      const today = new Date().toISOString().split('T')[0];
-      const invoiceWithDate = { ...invoice, generatedDate: today };
-      const filtered = prev.filter(inv => inv.id !== invoice.id && inv.generatedDate === today);
-      const updated = [invoiceWithDate, ...filtered];
-      localStorage.setItem('skating_invoice_history', JSON.stringify(updated));
-      return updated;
-    });
-  };
-
-  const loadInvoiceFromHistory = (pastInvoice: InvoiceData) => {
-    setInvoice(pastInvoice);
-    setView('invoice');
   };
 
   const downloadImage = async () => {
@@ -344,7 +286,6 @@ export default function App() {
       link.href = dataUrl;
       link.click();
       
-      saveToHistory();
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
     } catch (error) {
@@ -375,7 +316,6 @@ export default function App() {
       pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
       pdf.save(`Invoice_${invoice.studentName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`);
       
-      saveToHistory();
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
     } catch (error) {
@@ -654,37 +594,6 @@ export default function App() {
                 </div>
               </section>
 
-              {/* Invoice History */}
-              <section className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center">
-                    <History className="w-4 h-4 text-blue-600" />
-                  </div>
-                  <h2 className="text-lg font-semibold">Recent Invoices</h2>
-                </div>
-                
-                <div className="flex flex-col gap-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
-                  {invoiceHistory.length > 0 ? invoiceHistory.map(inv => (
-                    <div 
-                      key={inv.id}
-                      onClick={() => loadInvoiceFromHistory(inv)}
-                      className="group flex flex-col p-3 rounded-xl border border-slate-100 hover:border-blue-300 hover:bg-blue-50 transition-all cursor-pointer"
-                    >
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="text-sm font-bold text-slate-700">{inv.studentName || 'Unknown Student'}</span>
-                        <span className="text-xs font-semibold text-slate-500">${inv.amount}</span>
-                      </div>
-                      <div className="flex justify-between items-center text-xs text-slate-400">
-                        <span>{inv.lessons.length} lesson(s)</span>
-                        <span>Due: {inv.dueDate}</span>
-                      </div>
-                    </div>
-                  )) : (
-                    <p className="text-sm text-slate-400 italic">No past invoices found. Generated invoices will appear here.</p>
-                  )}
-                </div>
-              </section>
-
               {/* Invoice Details Form */}
               <section className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 space-y-6">
                 <div className="flex items-center gap-2 mb-2">
@@ -784,24 +693,14 @@ export default function App() {
                             />
                           </div>
                         </div>
-                        <div className="absolute -right-2 -top-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {invoice.lessons.length > 1 && (
                           <button 
-                            onClick={() => duplicateLesson(lesson.id)}
-                            className="p-1.5 bg-white border border-slate-200 text-blue-500 rounded-full shadow-sm hover:bg-slate-50"
-                            title="Duplicate Lesson"
+                            onClick={() => removeLesson(lesson.id)}
+                            className="absolute -right-2 -top-2 p-1 bg-white border border-slate-200 text-red-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
                           >
-                            <Copy className="w-3.5 h-3.5" />
+                            <Trash2 className="w-3 h-3" />
                           </button>
-                          {invoice.lessons.length > 1 && (
-                            <button 
-                              onClick={() => removeLesson(lesson.id)}
-                              className="p-1.5 bg-white border border-slate-200 text-red-500 rounded-full shadow-sm hover:bg-slate-50"
-                              title="Remove Lesson"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -810,14 +709,14 @@ export default function App() {
                 <div>
                   <label className="block text-xs font-medium text-slate-500 uppercase mb-1">Payment Method</label>
                   <div className="relative">
-                    <CreditCard className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
-                    <textarea 
+                    <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input 
+                      type="text" 
                       name="paymentMethod"
                       value={invoice.paymentMethod}
                       onChange={handleInputChange}
-                      rows={6}
                       placeholder="e.g. Venmo: @coach-skate"
-                      className="w-full pl-10 pr-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500 transition-all resize-none"
+                      className="w-full pl-10 pr-4 py-2 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500 transition-all"
                     />
                   </div>
                 </div>
@@ -982,7 +881,7 @@ export default function App() {
                   <div className="mb-6">
                     <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#94a3b8', margin: 0 }}>Payment Instructions</p>
                     <div className="p-4 rounded-2xl" style={{ backgroundColor: '#f8fafc', border: '1px solid #f1f5f9' }}>
-                      <p className="text-sm font-semibold" style={{ color: '#334155', margin: 0, whiteSpace: 'pre-wrap' }}>{invoice.paymentMethod}</p>
+                      <p className="text-sm font-semibold" style={{ color: '#334155', margin: 0 }}>{invoice.paymentMethod}</p>
                     </div>
                   </div>
                   <div>
@@ -995,7 +894,6 @@ export default function App() {
                 <div className="col-span-5" style={{ gridColumn: 'span 5 / span 5' }}>
                   <div className="rounded-3xl p-6 text-right" style={{ backgroundColor: '#2563eb', color: '#ffffff', textAlign: 'right' }}>
                     <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#bfdbfe', margin: 0 }}>Total Amount Due</p>
-                    <p className="text-xs font-semibold mb-2" style={{ color: '#93c5fd', margin: 0 }}>Includes GST: ${(Number(invoice.amount) / 11).toFixed(2)}</p>
                     <h2 className="text-4xl font-black" style={{ margin: 0 }}>${Number(invoice.amount).toFixed(2)}</h2>
                   </div>
                 </div>
