@@ -14,7 +14,10 @@ import {
   CheckCircle2,
   ChevronRight,
   History,
-  Copy
+  Copy,
+  CheckSquare,
+  Check,
+  AlertCircle
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -110,6 +113,7 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingImg, setIsGeneratingImg] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [copySuccess, setCopySuccess] = useState<'checklist' | 'names' | null>(null);
   const invoiceRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const jsonFileInputRef = useRef<HTMLInputElement>(null);
@@ -248,6 +252,67 @@ export default function App() {
       return num / 60;
     }
     return num;
+  };
+
+  const getInvoiceVerification = (student: Student) => {
+    const todayInvoices = invoiceHistory.filter(inv => inv.studentName === student.name);
+    if (todayInvoices.length === 0) {
+      return { status: 'pending', message: 'Pending invoice creation', details: '' };
+    }
+    
+    const inv = todayInvoices[0];
+    const expectedRate = student.rate || 110;
+    const expectedAmount = calculateTotalAmount(inv.lessons, expectedRate, inv.appliedCredit || 0);
+    const actualAmount = inv.amount;
+    const actualRate = inv.rate;
+    
+    const isRateCorrect = actualRate === expectedRate;
+    const isAmountCorrect = Math.abs(actualAmount - expectedAmount) < 0.01;
+    
+    if (isRateCorrect && isAmountCorrect) {
+      return { 
+        status: 'correct', 
+        message: 'Correct', 
+        details: `Verified: ${inv.lessons.length} lesson(s) @ $${actualRate}/hr = $${actualAmount.toFixed(2)}` 
+      };
+    } else {
+      const issues = [];
+      if (!isRateCorrect) issues.push(`Rate differs ($${actualRate}/hr vs default $${expectedRate}/hr)`);
+      if (!isAmountCorrect) issues.push(`Amount mismatch (Invoiced: $${actualAmount.toFixed(2)}, expected: $${expectedAmount.toFixed(2)})`);
+      return { 
+        status: 'mismatch', 
+        message: 'Review Mismatch', 
+        details: issues.join('; ') 
+      };
+    }
+  };
+
+  const getKeepChecklistText = () => {
+    return students.map(student => {
+      const todayInvoices = invoiceHistory.filter(inv => inv.studentName === student.name);
+      const isDone = todayInvoices.length > 0;
+      if (isDone) {
+        const inv = todayInvoices[0];
+        const verification = getInvoiceVerification(student);
+        const statusText = verification.status === 'correct' ? 'Correct ✓' : 'Mismatch ⚠';
+        return `[x] ${student.name} (Invoiced: $${inv.amount.toFixed(2)} - ${statusText})`;
+      } else {
+        return `[ ] ${student.name} (Pending)`;
+      }
+    }).join('\n');
+  };
+
+  const getKeepNamesText = () => {
+    return students.map(s => s.name).join('\n');
+  };
+
+  const copyToClipboard = (text: string, type: 'checklist' | 'names') => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopySuccess(type);
+      setTimeout(() => setCopySuccess(null), 3000);
+    }).catch(err => {
+      console.error('Failed to copy text: ', err);
+    });
   };
 
   const getGoogleCalendarUrl = (lesson: Lesson, studentName: string, coachName: string) => {
@@ -835,14 +900,14 @@ export default function App() {
                 </button>
               </section>
 
-              {/* Student Quick Select */}
+              {/* Daily Invoice Checklist */}
               <section className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 bg-purple-50 rounded-lg flex items-center justify-center">
-                      <User className="w-4 h-4 text-purple-600" />
+                    <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center">
+                      <CheckSquare className="w-4 h-4 text-emerald-600" />
                     </div>
-                    <h2 className="text-lg font-semibold">Quick Select Student</h2>
+                    <h2 className="text-lg font-semibold">Daily Invoice Checklist</h2>
                   </div>
                   <button 
                     onClick={() => setView('students')}
@@ -851,25 +916,149 @@ export default function App() {
                     Manage All
                   </button>
                 </div>
+
+                <div className="flex justify-between items-center mb-4 text-xs">
+                  <span className="text-slate-400 font-medium">Click name to select student</span>
+                  <span className="font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                    {students.filter(s => invoiceHistory.some(inv => inv.studentName === s.name)).length}/{students.length} Done
+                  </span>
+                </div>
                 
-                <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
-                  {students.map(student => (
-                    <div 
-                      key={student.id}
-                      className={`group flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all cursor-pointer ${
-                        invoice.studentId === student.id 
-                        ? 'bg-purple-600 border-purple-600 text-white shadow-md shadow-purple-100' 
-                        : 'bg-white border-slate-200 text-slate-600 hover:border-purple-300'
-                      }`}
-                      onClick={() => selectStudentForInvoice(student)}
-                    >
-                      <span className="text-sm font-medium">{student.name}</span>
-                    </div>
-                  ))}
+                <div className="space-y-2.5 max-h-60 overflow-y-auto pr-2 custom-scrollbar mb-4">
+                  {students.map(student => {
+                    const todayInvoices = invoiceHistory.filter(inv => inv.studentName === student.name);
+                    const isDone = todayInvoices.length > 0;
+                    const isSelected = invoice.studentId === student.id;
+                    const verification = getInvoiceVerification(student);
+                    
+                    return (
+                      <div 
+                        key={student.id}
+                        className={`group flex flex-col gap-1.5 p-3 rounded-xl border transition-all cursor-pointer ${
+                          isSelected 
+                            ? 'bg-blue-50 border-blue-200 text-blue-900 shadow-sm'
+                            : isDone
+                              ? 'bg-slate-50/50 border-slate-100 text-slate-400' 
+                              : 'bg-white border-slate-200 text-slate-700 hover:border-blue-300 shadow-sm hover:shadow'
+                        }`}
+                        onClick={() => selectStudentForInvoice(student)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-5 h-5 rounded-md flex items-center justify-center border transition-all ${
+                              isDone 
+                                ? 'bg-emerald-500 border-emerald-500 text-white shadow-sm' 
+                                : 'bg-white border-slate-300 group-hover:border-blue-500'
+                            }`}>
+                              {isDone && <Check className="w-3.5 h-3.5 animate-[scaleIn_0.15s_ease-out]" />}
+                            </div>
+                            <span className={`text-sm font-semibold ${isDone ? 'line-through text-slate-400' : 'text-slate-700'}`}>
+                              {student.name}
+                            </span>
+                          </div>
+                          <div>
+                            {isDone ? (
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                                Done
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full group-hover:text-blue-600 group-hover:bg-blue-50 transition-colors">
+                                Pending
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Double Check Verification Details */}
+                        {isDone && (
+                          <div className="pl-8 flex items-start gap-1">
+                            {verification.status === 'correct' ? (
+                              <div className="flex items-center gap-1 text-[11px] font-medium text-emerald-600 bg-emerald-50/50 border border-emerald-100 px-2 py-0.5 rounded-md w-full">
+                                <CheckCircle2 className="w-3 h-3 flex-shrink-0" />
+                                <span className="truncate">{verification.details}</span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1 text-[11px] font-medium text-amber-600 bg-amber-50/50 border border-amber-100 px-2 py-0.5 rounded-md w-full">
+                                <AlertCircle className="w-3 h-3 flex-shrink-0 text-amber-600" />
+                                <span className="truncate" title={verification.details}>{verification.message}: {verification.details}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                   {students.length === 0 && (
                     <p className="text-sm text-slate-400 italic">No students saved yet. Go to Students tab to add some.</p>
                   )}
                 </div>
+
+                {/* Google Keep Vibe Note Panel */}
+                {students.length > 0 && (
+                  <div className="bg-[#fef9c3]/80 border border-yellow-200 rounded-2xl p-4 shadow-sm relative overflow-hidden transition-all hover:bg-[#fef9c3] hover:shadow-md animate-[fadeIn_0.3s_ease-out]">
+                    {/* Background Sticky Note Vibe */}
+                    <div className="absolute top-0 right-0 w-8 h-8 bg-yellow-200/50 rounded-bl-3xl"></div>
+                    
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <StickyNote className="w-4 h-4 text-yellow-600" />
+                      <span className="text-xs font-bold uppercase tracking-wider text-yellow-800">Google Keep Notes Sync</span>
+                    </div>
+
+                    <p className="text-xs text-slate-600 mb-3 leading-relaxed">
+                      Copy your daily student list in Keep-friendly checkbox formats to track in your personal organizer notes!
+                    </p>
+
+                    <div className="space-y-2">
+                      <button 
+                        onClick={() => copyToClipboard(getKeepChecklistText(), 'checklist')}
+                        className="w-full py-2 bg-yellow-100 hover:bg-yellow-200 border border-yellow-300 text-yellow-900 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                      >
+                        {copySuccess === 'checklist' ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            <span className="text-emerald-700">Copied Checklist!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Copy Checklist Format</span>
+                          </>
+                        )}
+                      </button>
+                      
+                      <button 
+                        onClick={() => copyToClipboard(getKeepNamesText(), 'names')}
+                        className="w-full py-2 bg-white/60 hover:bg-white border border-yellow-200 text-yellow-900 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                      >
+                        {copySuccess === 'names' ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            <span className="text-emerald-700">Copied Student Names!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Copy Names List Only</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Keep Preview Box */}
+                    <div className="mt-3 p-2.5 bg-yellow-50/50 border border-yellow-100 rounded-xl text-[10px] text-yellow-900/80 font-mono leading-normal max-h-24 overflow-y-auto custom-scrollbar">
+                      <div className="font-bold border-b border-yellow-200/50 pb-1 mb-1 text-[11px]">Clipboard Preview:</div>
+                      {students.map(s => {
+                        const todayInvoices = invoiceHistory.filter(inv => inv.studentName === s.name);
+                        const isDone = todayInvoices.length > 0;
+                        return (
+                          <div key={s.id} className="truncate">
+                            {isDone ? '☑' : '☐'} {s.name} {isDone ? '✓' : ''}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </section>
 
               {/* Saved Invoices (Retrace Work) */}
