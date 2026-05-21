@@ -250,6 +250,51 @@ export default function App() {
     return num;
   };
 
+  const getGoogleCalendarUrl = (lesson: Lesson, studentName: string, coachName: string) => {
+    if (lesson.type === 'Credit') return '';
+
+    const isCycle = lesson.type === '6-Week Cycle';
+    const durationMinutes = parseInt(lesson.duration) || 60;
+    const startTime = lesson.time || '09:00';
+    const [hours, minutes] = startTime.split(':').map(Number);
+    
+    // Parse date parts manually to avoid timezone displacement when doing new Date(string)
+    const [year, month, day] = lesson.date.split('-').map(Number);
+    
+    const startDateObj = new Date(year, month - 1, day, hours || 9, minutes || 0, 0, 0);
+    const endDateObj = new Date(startDateObj.getTime() + durationMinutes * 60 * 1000);
+
+    const formatGCalDate = (d: Date) => {
+      const pad = (n: number) => n.toString().padStart(2, '0');
+      const yyyy = d.getFullYear();
+      const mm = pad(d.getMonth() + 1);
+      const dd = pad(d.getDate());
+      const hh = pad(d.getHours());
+      const min = pad(d.getMinutes());
+      const ss = pad(d.getSeconds());
+      return `${yyyy}${mm}${dd}T${hh}${min}${ss}`;
+    };
+
+    const datesParam = `${formatGCalDate(startDateObj)}/${formatGCalDate(endDateObj)}`;
+    
+    const label = lesson.name || (isCycle ? '6-week Private Lesson Package' : 'Private Ice Skating Lesson');
+    const title = encodeURIComponent(`${label} - ${studentName || 'Student'}`);
+    const details = encodeURIComponent(
+      `Student: ${studentName || 'N/A'}\n` +
+      `Coach: ${coachName || 'N/A'}\n` +
+      `Duration: ${lesson.duration}\n` +
+      (isCycle ? `6-Week Cycle Package starting on ${lesson.date}` : `Single lesson scheduled at ${lesson.time}`)
+    );
+    
+    let url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${datesParam}&details=${details}`;
+    
+    if (isCycle) {
+      url += `&recur=RRULE%3DFREQ%3DWEEKLY%3BCOUNT%3D6`;
+    }
+    
+    return url;
+  };
+
   const saveInvoiceToHistory = (invToSave: InvoiceData = invoice) => {
     setInvoiceHistory(prev => {
       const timestamp = new Date().toISOString();
@@ -1159,6 +1204,17 @@ export default function App() {
                         )}
 
                         <div className="absolute right-2 -top-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {!isCredit && (
+                            <a 
+                              href={getGoogleCalendarUrl(lesson, invoice.studentName, invoice.coachName)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Add to Google Calendar"
+                              className="p-1.5 bg-white border border-slate-200 text-emerald-600 rounded-full shadow-sm hover:bg-slate-50 transition-colors flex items-center justify-center"
+                            >
+                              <Calendar className="w-3.5 h-3.5" />
+                            </a>
+                          )}
                           <button 
                             type="button"
                             onClick={() => duplicateLesson(lesson.id)}
