@@ -17,7 +17,9 @@ import {
   Copy,
   CheckSquare,
   Check,
-  AlertCircle
+  AlertCircle,
+  Search,
+  X
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -75,6 +77,21 @@ export default function App() {
   const [view, setView] = useState<View>('invoice');
   const [students, setStudents] = useState<Student[]>([]);
   const [invoiceHistory, setInvoiceHistory] = useState<InvoiceData[]>([]);
+  
+  const getLocalDateString = (date: Date = new Date()) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const [selectedChecklistDate, setSelectedChecklistDate] = useState<string>(getLocalDateString());
+  const [checklistSearch, setChecklistSearch] = useState('');
+
+  const sortedFilteredStudents = [...students]
+    .filter(s => s.name.toLowerCase().includes(checklistSearch.toLowerCase()))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
   const [newStudent, setNewStudent] = useState<Partial<Student>>({
     name: '',
     parentName: '',
@@ -155,13 +172,13 @@ export default function App() {
     const savedHistory = localStorage.getItem('skating_invoice_history');
     if (savedHistory) {
       const parsed = JSON.parse(savedHistory) as InvoiceData[];
-      const todayStr = new Date().toDateString();
-      const todaysInvoices = parsed.filter((inv: any) => {
-        const savedDate = inv.savedAt ? new Date(inv.savedAt).toDateString() : todayStr;
-        return savedDate === todayStr;
+      const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const recentInvoices = parsed.filter((inv: any) => {
+        const savedTime = inv.savedAt ? new Date(inv.savedAt).getTime() : Date.now();
+        return savedTime >= thirtyDaysAgo;
       });
-      setInvoiceHistory(todaysInvoices);
-      localStorage.setItem('skating_invoice_history', JSON.stringify(todaysInvoices));
+      setInvoiceHistory(recentInvoices);
+      localStorage.setItem('skating_invoice_history', JSON.stringify(recentInvoices));
     }
   }, []);
 
@@ -255,8 +272,14 @@ export default function App() {
     return num;
   };
 
-  const getInvoiceVerification = (student: Student) => {
-    const todayInvoices = invoiceHistory.filter(inv => inv.studentName === student.name);
+  const getInvoiceVerification = (student: Student, dateStr?: string) => {
+    const targetDate = dateStr || selectedChecklistDate;
+    const todayInvoices = invoiceHistory.filter(inv => {
+      const invDate = inv.savedAt 
+        ? getLocalDateString(new Date(inv.savedAt))
+        : getLocalDateString();
+      return inv.studentName === student.name && invDate === targetDate;
+    });
     if (todayInvoices.length === 0) {
       return { status: 'pending', message: 'Pending invoice creation', details: '' };
     }
@@ -289,12 +312,18 @@ export default function App() {
   };
 
   const getKeepChecklistText = () => {
-    return students.map(student => {
-      const todayInvoices = invoiceHistory.filter(inv => inv.studentName === student.name);
-      const isDone = todayInvoices.length > 0;
+    const sorted = [...students].sort((a, b) => a.name.localeCompare(b.name));
+    return sorted.map(student => {
+      const targetInvoices = invoiceHistory.filter(inv => {
+        const invDate = inv.savedAt 
+          ? getLocalDateString(new Date(inv.savedAt))
+          : getLocalDateString();
+        return inv.studentName === student.name && invDate === selectedChecklistDate;
+      });
+      const isDone = targetInvoices.length > 0;
       if (isDone) {
-        const inv = todayInvoices[0];
-        const verification = getInvoiceVerification(student);
+        const inv = targetInvoices[0];
+        const verification = getInvoiceVerification(student, selectedChecklistDate);
         const statusText = verification.status === 'correct' ? 'Correct ✓' : 'Mismatch ⚠';
         return `[x] ${student.name} (Invoiced: $${inv.amount.toFixed(2)} - ${statusText})`;
       } else {
@@ -304,7 +333,7 @@ export default function App() {
   };
 
   const getKeepNamesText = () => {
-    return students.map(s => s.name).join('\n');
+    return [...students].sort((a, b) => a.name.localeCompare(b.name)).map(s => s.name).join('\n');
   };
 
   const copyToClipboard = (text: string, type: 'checklist' | 'names') => {
@@ -344,7 +373,8 @@ export default function App() {
     const datesParam = `${formatGCalDate(startDateObj)}/${formatGCalDate(endDateObj)}`;
     
     const label = lesson.name || (isCycle ? '6-week Private Lesson Package' : 'Private Ice Skating Lesson');
-    const title = encodeURIComponent(`${label} - ${studentName || 'Student'}`);
+    // Display student name first, followed by lesson name on the event title
+    const title = encodeURIComponent(`${studentName || 'Student'} - ${label}`);
     const details = encodeURIComponent(
       `Student: ${studentName || 'N/A'}\n` +
       `Coach: ${coachName || 'N/A'}\n` +
@@ -355,7 +385,8 @@ export default function App() {
     let url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${datesParam}&details=${details}`;
     
     if (isCycle) {
-      url += `&recur=RRULE%3DFREQ%3DWEEKLY%3BCOUNT%3D6`;
+      // Default set the repeat day for the event as weekly and 6 occurrences (RRULE:FREQ=WEEKLY;COUNT=6)
+      url += `&recur=RRULE%3AFREQ%3DWEEKLY%3BCOUNT%3D6`;
     }
     
     return url;
@@ -921,19 +952,69 @@ export default function App() {
                   </button>
                 </div>
 
+                {/* Checklist Controls */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                  {/* Search box */}
+                  <div className="relative flex items-center">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
+                    <input 
+                      type="text"
+                      placeholder="Search student..."
+                      value={checklistSearch}
+                      onChange={(e) => setChecklistSearch(e.target.value)}
+                      className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-100 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all font-semibold text-slate-700 placeholder-slate-400"
+                    />
+                    {checklistSearch && (
+                      <button 
+                        onClick={() => setChecklistSearch('')}
+                        className="p-1 hover:bg-slate-100 rounded-full absolute right-2 text-slate-400 hover:text-slate-600 transition-colors"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Date selector picker */}
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-grow flex items-center">
+                      <Calendar className="w-4 h-4 text-blue-500 absolute left-3 pointer-events-none" />
+                      <input 
+                        type="date"
+                        value={selectedChecklistDate}
+                        onChange={(e) => setSelectedChecklistDate(e.target.value)}
+                        className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-slate-700 cursor-pointer"
+                      />
+                    </div>
+                    {selectedChecklistDate !== getLocalDateString() && (
+                      <button
+                        onClick={() => setSelectedChecklistDate(getLocalDateString())}
+                        className="px-2.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 hover:text-blue-700 rounded-xl text-xs font-extrabold transition-all duration-200"
+                        title="Jump back to today"
+                      >
+                        Today
+                      </button>
+                    )}
+                  </div>
+                </div>
+
                 <div className="flex justify-between items-center mb-4 text-xs">
                   <span className="text-slate-400 font-medium">Click name to select student</span>
                   <span className="font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
-                    {students.filter(s => invoiceHistory.some(inv => inv.studentName === s.name)).length}/{students.length} Done
+                    {students.filter(s => invoiceHistory.some(inv => inv.studentName === s.name && (inv.savedAt ? getLocalDateString(new Date(inv.savedAt)) === selectedChecklistDate : false))).length}/{students.length} Done
                   </span>
                 </div>
                 
                 <div className="space-y-2.5 max-h-60 overflow-y-auto pr-2 custom-scrollbar mb-4">
-                  {students.map(student => {
-                    const todayInvoices = invoiceHistory.filter(inv => inv.studentName === student.name);
-                    const isDone = todayInvoices.length > 0;
+                  {sortedFilteredStudents.map(student => {
+                    const studentInvoicesOnDate = invoiceHistory.filter(inv => {
+                      const invDate = inv.savedAt 
+                        ? getLocalDateString(new Date(inv.savedAt))
+                        : getLocalDateString();
+                      return inv.studentName === student.name && invDate === selectedChecklistDate;
+                    });
+                    const isDone = studentInvoicesOnDate.length > 0;
                     const isSelected = invoice.studentId === student.id;
-                    const verification = getInvoiceVerification(student);
+                    const verification = getInvoiceVerification(student, selectedChecklistDate);
                     
                     return (
                       <div 
@@ -992,8 +1073,12 @@ export default function App() {
                       </div>
                     );
                   })}
-                  {students.length === 0 && (
-                    <p className="text-sm text-slate-400 italic">No students saved yet. Go to Students tab to add some.</p>
+                  {sortedFilteredStudents.length === 0 && (
+                    <p className="text-sm text-slate-400 italic">
+                      {students.length === 0 
+                        ? "No students saved yet. Go to Students tab to add some." 
+                        : "No students matching your search query."}
+                    </p>
                   )}
                 </div>
 
@@ -1051,9 +1136,14 @@ export default function App() {
                     {/* Keep Preview Box */}
                     <div className="mt-3 p-2.5 bg-yellow-50/50 border border-yellow-100 rounded-xl text-[10px] text-yellow-900/80 font-mono leading-normal max-h-24 overflow-y-auto custom-scrollbar">
                       <div className="font-bold border-b border-yellow-200/50 pb-1 mb-1 text-[11px]">Clipboard Preview:</div>
-                      {students.map(s => {
-                        const todayInvoices = invoiceHistory.filter(inv => inv.studentName === s.name);
-                        const isDone = todayInvoices.length > 0;
+                      {[...students].sort((a, b) => a.name.localeCompare(b.name)).map(s => {
+                        const targetInvoices = invoiceHistory.filter(inv => {
+                          const invDate = inv.savedAt 
+                            ? getLocalDateString(new Date(inv.savedAt))
+                            : getLocalDateString();
+                          return inv.studentName === s.name && invDate === selectedChecklistDate;
+                        });
+                        const isDone = targetInvoices.length > 0;
                         return (
                           <div key={s.id} className="truncate">
                             {isDone ? '☑' : '☐'} {s.name} {isDone ? '✓' : ''}
@@ -1072,7 +1162,11 @@ export default function App() {
                     <div className="w-8 h-8 bg-green-50 rounded-lg flex items-center justify-center">
                       <History className="w-4 h-4 text-green-600" />
                     </div>
-                    <h2 className="text-lg font-semibold">Today's Invoices</h2>
+                    <h2 className="text-lg font-semibold animate-[fadeIn_0.2s_ease-out]">
+                      {selectedChecklistDate === getLocalDateString() 
+                        ? "Today's Invoices" 
+                        : `Invoices on ${selectedChecklistDate}`}
+                    </h2>
                   </div>
                   <button 
                     onClick={() => {
@@ -1084,7 +1178,7 @@ export default function App() {
                         email: '',
                         lessons: [{
                           id: Date.now().toString(),
-                          date: new Date().toISOString().split('T')[0],
+                          date: selectedChecklistDate,
                           time: '10:00',
                           duration: '60 min',
                           type: 'Single',
@@ -1110,7 +1204,12 @@ export default function App() {
                 </div>
                 
                 <div className="space-y-2 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-                  {invoiceHistory.map((inv) => {
+                  {invoiceHistory.filter(inv => {
+                    const invDate = inv.savedAt 
+                      ? getLocalDateString(new Date(inv.savedAt))
+                      : getLocalDateString();
+                    return invDate === selectedChecklistDate;
+                  }).map((inv) => {
                     const formattedTime = inv.savedAt 
                       ? new Date(inv.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                       : 'Recently';
@@ -1150,8 +1249,15 @@ export default function App() {
                       </div>
                     );
                   })}
-                  {invoiceHistory.length === 0 && (
-                    <p className="text-sm text-slate-400 italic">No invoices recorded today yet. Download a PDF/Image or click "Save Draft" to record.</p>
+                  {invoiceHistory.filter(inv => {
+                    const invDate = inv.savedAt 
+                      ? getLocalDateString(new Date(inv.savedAt))
+                      : getLocalDateString();
+                    return invDate === selectedChecklistDate;
+                  }).length === 0 && (
+                    <p className="text-sm text-slate-400 italic py-2">
+                      No invoices recorded for {selectedChecklistDate === getLocalDateString() ? "today" : selectedChecklistDate} yet. Download a PDF/Image or click "Save Draft" to record.
+                    </p>
                   )}
                 </div>
                 <input 
