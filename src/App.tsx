@@ -532,13 +532,7 @@ export default function App() {
 
   // Google Sync helpers
   const triggerAutoSyncIfLoggedIn = () => {
-    const currentToken = localStorage.getItem('skating_google_token');
-    const tokenExpiry = Number(localStorage.getItem('skating_google_token_expiry')) || 0;
-    if (currentToken && Date.now() < tokenExpiry) {
-      setTimeout(() => {
-        triggerGoogleSync(currentToken, tokenExpiry).catch(console.error);
-      }, 500);
-    }
+    // Completely disabled to give the user 100% manual control over all sync actions.
   };
 
   const getRedirectUri = () => {
