@@ -540,7 +540,15 @@ export default function App() {
     if (!origin || origin === 'null' || origin.startsWith('file:')) {
       return 'https://localhost/';
     }
-    return origin.endsWith('/') ? origin : `${origin}/`;
+    let path = window.location.pathname || '/';
+    // Remove index.html or similar filename from pathname to construct a folder-based redirect URI
+    if (path.endsWith('.html') || path.endsWith('.htm')) {
+      const parts = path.split('/');
+      parts.pop();
+      path = parts.join('/') + '/';
+    }
+    let fullUrl = origin + path;
+    return fullUrl.endsWith('/') ? fullUrl : `${fullUrl}/`;
   };
 
   const startGoogleDeviceFlow = async () => {
